@@ -1,10 +1,10 @@
 const cache = new Map();
 const TTL = 5 * 60 * 1000; // 5 minutes
 
-const normalizeKey = (query) => query.toLowerCase().trim();
+const normalizeKey = (query, documentId = "default") => `${documentId}_${query.toLowerCase().trim()}`;
 
-export const getCache = (query) => {
-    const key = normalizeKey(query);
+export const getCache = (query, documentId) => {
+    const key = normalizeKey(query, documentId);
     const entry = cache.get(key);
     
     if (!entry) return null;
@@ -17,8 +17,8 @@ export const getCache = (query) => {
     return entry.data;
 };
 
-export const setCache = (query, response) => {
-    const key = normalizeKey(query);
+export const setCache = (query, response, documentId) => {
+    const key = normalizeKey(query, documentId);
     cache.set(key, {
         timestamp: Date.now(),
         data: response

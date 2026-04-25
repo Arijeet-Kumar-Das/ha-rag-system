@@ -1,13 +1,23 @@
 export const chunkText = (text, targetWordCount = 500, overlapWordCount = 100) => {
-    // 1. Sentence-aware splitting: Split by paragraphs first to keep bullet points/lists intact
-    const paragraphs = text.split(/\n\s*\n/);
+    if (!text || typeof text !== "string") return [];
+
+    // 1. Normalize whitespace and split by paragraphs to preserve structure.
+    const normalizedText = text
+        .replace(/\r\n/g, "\n")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    if (!normalizedText) return [];
+
+    const paragraphs = normalizedText.split(/\n\s*\n/);
     const segments = [];
 
     for (const p of paragraphs) {
         const words = p.trim().split(/\s+/).length;
         if (words > targetWordCount * 0.8) {
-            // If a single paragraph is very large, carefully split by sentences
-            const sentences = p.match(/[^.!?]+[.!?]+/g);
+            // If a paragraph is large, split sentence-aware but keep trailing text too.
+            const sentences = p.match(/[^.!?]+[.!?]+|[^.!?]+$/g);
             if (sentences) {
                 segments.push(...sentences.map(s => s.trim()).filter(s => s));
             } else {

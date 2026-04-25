@@ -5,12 +5,14 @@ const API_BASE = "/api";
  * Calls onToken for each chunk of text received.
  * Returns the full accumulated answer when done.
  */
-export const askQuestion = async (question, onToken) => {
+export const askQuestion = async (question, documentId, chatId, onToken, mode = "standard") => {
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, documentId, chatId, mode }),
   });
+
+  const newChatId = res.headers.get("X-Chat-Id") || null;
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -20,6 +22,7 @@ export const askQuestion = async (question, onToken) => {
   const contentType = res.headers.get("Content-Type") || "";
 
   let sources = [];
+  let verification = null;
   try {
     const sourcesHeader = res.headers.get("X-Sources");
     if (sourcesHeader) {
@@ -36,7 +39,7 @@ export const askQuestion = async (question, onToken) => {
     if (data.answer) {
       onToken(data.answer, sources);
     }
-    return { answer: data.answer || "", sources };
+    return { answer: data.answer || "", sources, verification, chatId: newChatId };
   }
 
   // Otherwise stream token-by-token
@@ -49,10 +52,49 @@ export const askQuestion = async (question, onToken) => {
     if (done) break;
     const chunk = decoder.decode(value, { stream: true });
     full += chunk;
-    onToken(chunk, sources);
+
+    // Check if this chunk contains the sources delimiter
+    if (full.includes("__SOURCES__")) {
+      // Don't send the delimiter or sources JSON as tokens
+      const delimiterIndex = full.lastIndexOf("\n\n__SOURCES__");
+      const answerPart = full.substring(0, delimiterIndex);
+      // Only send the new answer content that hasn't been sent yet
+      const alreadySentLength = full.length - chunk.length;
+      if (delimiterIndex > alreadySentLength) {
+        const unsent = answerPart.substring(alreadySentLength);
+        if (unsent) onToken(unsent, sources);
+      }
+
+      // Parse payload from the delimiter (now contains {sources, verification})
+      try {
+        const payloadJson = full.substring(full.lastIndexOf("__SOURCES__") + "__SOURCES__".length);
+        const payload = JSON.parse(payloadJson);
+        sources = payload.sources || sources;
+        verification = payload.verification || null;
+      } catch (e) {
+        console.error("Failed to parse inline payload", e);
+      }
+      full = answerPart;
+    } else {
+      onToken(chunk, sources);
+    }
   }
 
-  return { answer: full, sources };
+  // Final check: if the delimiter wasn't caught mid-chunk
+  if (full.includes("__SOURCES__")) {
+    const delimiterIndex = full.lastIndexOf("\n\n__SOURCES__");
+    try {
+      const payloadJson = full.substring(full.lastIndexOf("__SOURCES__") + "__SOURCES__".length);
+      const payload = JSON.parse(payloadJson);
+      sources = payload.sources || sources;
+      verification = payload.verification || null;
+    } catch (e) {
+      console.error("Failed to parse inline payload", e);
+    }
+    full = full.substring(0, delimiterIndex);
+  }
+
+  return { answer: full, sources, verification, chatId: newChatId };
 };
 
 /**
@@ -72,5 +114,38 @@ export const uploadFile = async (file, onProgress) => {
     throw new Error(err.error || "Upload failed");
   }
 
+  return res.json();
+};
+
+/**
+ * Fetch all available documents for the workspace.
+ */
+export const getDocuments = async () => {
+  const res = await fetch(`${API_BASE}/document`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch documents");
+  }
+  return res.json();
+};
+
+/**
+ * Chat APIs
+ */
+export const getChatsByDocument = async (documentId) => {
+  const res = await fetch(`${API_BASE}/chat/${documentId}`);
+  if (!res.ok) throw new Error("Failed to fetch chats");
+  return res.json();
+};
+
+export const getChatMessages = async (chatId) => {
+  const res = await fetch(`${API_BASE}/chat/detail/${chatId}`);
+  if (!res.ok) throw new Error("Failed to fetch messages");
+  return res.json();
+};
+
+export const deleteChat = async (chatId) => {
+  const res = await fetch(`${API_BASE}/chat/${chatId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete chat");
   return res.json();
 };

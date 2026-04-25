@@ -4,6 +4,7 @@ import { generateEmbedding } from "../services/embeddingService.js";
 import { getIndex } from "../services/vectorService.js";
 import { randomUUID } from "crypto";
 import Chunk from "../models/Chunk.js";
+import Document from "../models/Document.js";
 
 export const uploadPDF = async (req, res) => {
     try {
@@ -11,7 +12,34 @@ export const uploadPDF = async (req, res) => {
             return res.status(400).json({ error: "File is required" });
         }
 
-        // 1. Extract text
+        const fileName = req.file.originalname;
+        const index = getIndex();
+        const userId = "anonymous";
+        const DOC_LIMIT = process.env.MAX_DOCUMENTS_PER_USER ? parseInt(process.env.MAX_DOCUMENTS_PER_USER) : 10;
+
+        // 1. Storage Limiting and Duplicate Handling
+        const existingDoc = await Document.findOne({ fileName, userId });
+        if (existingDoc) {
+            console.log(`[UPLOAD] Duplicate found for ${fileName}. Deleting old namespace ${existingDoc.namespace}.`);
+            try { await index.namespace(existingDoc.namespace).deleteAll(); } catch(e) {}
+            await Chunk.deleteMany({ namespace: existingDoc.namespace });
+            await Document.deleteOne({ namespace: existingDoc.namespace });
+        }
+
+        const userDocsCount = await Document.countDocuments({ userId });
+        if (userDocsCount >= DOC_LIMIT) {
+            console.log(`[UPLOAD] Storage limit reached (${DOC_LIMIT}). Deleting oldest document.`);
+            const oldestDoc = await Document.findOne({ userId }).sort({ uploadDate: 1 });
+            if (oldestDoc) {
+                try { await index.namespace(oldestDoc.namespace).deleteAll(); } catch(e) {}
+                await Chunk.deleteMany({ namespace: oldestDoc.namespace });
+                await Document.deleteOne({ namespace: oldestDoc.namespace });
+            }
+        }
+
+        const documentId = randomUUID();
+
+        // 2. Extract text
         const text = await extractTextFromPDF(req.file.path);
         console.log("TEXT LENGTH:", text.length);
 
@@ -21,10 +49,9 @@ export const uploadPDF = async (req, res) => {
             });
         }
 
-        // 2. Chunk text
+        // 3. Chunk text
         const chunks = chunkText(text);
         console.log("CHUNKS:", chunks.length);
-        console.log("CHUNK SAMPLE:", JSON.stringify(chunks[0]));
 
         if (!chunks || chunks.length === 0) {
             return res.status(400).json({
@@ -32,18 +59,25 @@ export const uploadPDF = async (req, res) => {
             });
         }
 
-        const index = getIndex();
+        // Save new Document metadata
+        await Document.create({
+            fileName,
+            namespace: documentId,
+            userId,
+            chunkCount: chunks.length
+        });
 
-        // Save chunks to MongoDB
-        const savedChunks = await Chunk.insertMany(
+        // Save chunks to MongoDB with namespace reference
+        await Chunk.insertMany(
             chunks.map((c, i) => ({
                 text: c.content,
                 chunkIndex: i,
-                fileName: req.file.originalname
+                fileName: fileName,
+                namespace: documentId
             }))
         );
 
-        // 3. Generate embeddings in parallel batches
+        // 4. Generate embeddings in parallel batches
         const vectors = [];
         console.time("Embeddings Generation");
         const BATCH_SIZE = 5;
@@ -54,18 +88,12 @@ export const uploadPDF = async (req, res) => {
                 const globalIndex = i + indexInBatch;
                 const chunk = chunkObj.content.trim();
 
-                if (!chunk) {
-                    console.warn(`Chunk ${globalIndex} is empty, skipping`);
-                    return;
-                }
+                if (!chunk) return;
 
                 try {
                     const embedding = await generateEmbedding(chunk);
 
-                    if (!Array.isArray(embedding) || embedding.length === 0) {
-                        console.error(`Chunk ${globalIndex}: invalid embedding, skipping`);
-                        return;
-                    }
+                    if (!Array.isArray(embedding) || embedding.length === 0) return;
 
                     vectors.push({
                         id: randomUUID(),
@@ -73,16 +101,15 @@ export const uploadPDF = async (req, res) => {
                         metadata: {
                             text: chunk,
                             chunkIndex: globalIndex,
-                            fileName: req.file.originalname
+                            fileName: fileName,
+                            namespace: documentId
                         }
                     });
                 } catch (err) {
-                    // Prevent full crash if one chunk fails
                     console.error(`Embedding failed for chunk ${globalIndex}:`, err.message);
                 }
             });
 
-            // Wait for max 5 concurrent embeddings
             await Promise.all(batchPromises);
         }
         console.timeEnd("Embeddings Generation");
@@ -96,12 +123,15 @@ export const uploadPDF = async (req, res) => {
         }
 
         console.time("Pinecone Upsert");
-        // 4. Store in Pinecone
-        await index.upsert({ records: vectors, namespace: "default" });
+        // 5. Store in Pinecone using the specific document namespace
+        await index.namespace(documentId).upsert({ records: vectors });
         console.timeEnd("Pinecone Upsert");
+
+        console.log(`[UPLOAD] Successfully processed. Namespace used: ${documentId}, vectors stored: ${vectors.length}`);
 
         res.json({
             message: "PDF processed and stored successfully",
+            documentId: documentId,
             totalChunks: chunks.length,
             storedVectors: vectors.length
         });

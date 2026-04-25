@@ -1,8 +1,13 @@
 import Chunk from "../models/Chunk.js";
 
-export const keywordSearch = async (query) => {
+export const keywordSearch = async (query, namespace) => {
+    const filter = { $text: { $search: query } };
+    if (namespace) {
+        filter.namespace = namespace;
+    }
+
     const results = await Chunk.find(
-        { $text: { $search: query } },
+        filter,
         { score: { $meta: "textScore" } }
     )
         .sort({ score: { $meta: "textScore" } })

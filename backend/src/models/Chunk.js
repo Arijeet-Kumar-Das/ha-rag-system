@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 const chunkSchema = new mongoose.Schema({
     text: String,
     chunkIndex: Number,
-    fileName: String
+    fileName: String,
+    namespace: String
 });
 
 

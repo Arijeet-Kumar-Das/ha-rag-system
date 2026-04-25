@@ -8,7 +8,7 @@ const getClient = () => {
     return client;
 };
 
-const buildMessages = (question, chunks) => {
+const buildMessages = (question, chunks, chatHistory = []) => {
     if (!chunks || chunks.length === 0) {
         return null;
     }
@@ -50,11 +50,38 @@ const buildMessages = (question, chunks) => {
         currentWordCount += words.length;
     }
 
+    // 4. Prepend chatHistory (limit to last 6 messages, trim each to prevent overflow)
+    const MAX_HISTORY_WORDS = 1500;
+    const MAX_PER_MESSAGE_WORDS = 500;
+    let historyWordCount = 0;
+
+    const trimmedHistory = chatHistory.slice(-6);
+    const historyMessages = [];
+
+    for (const msg of trimmedHistory) {
+        const words = (msg.content || "").split(/\s+/);
+        const trimmedWords = words.slice(0, MAX_PER_MESSAGE_WORDS);
+        const trimmedContent = trimmedWords.join(" ") + (words.length > MAX_PER_MESSAGE_WORDS ? "..." : "");
+
+        if (historyWordCount + trimmedWords.length > MAX_HISTORY_WORDS) {
+            break; // Stop adding more history to prevent context overflow
+        }
+
+        historyMessages.push({
+            role: msg.role,
+            content: trimmedContent
+        });
+        historyWordCount += trimmedWords.length;
+    }
+
+    console.log(`[LLM] Chat history: ${historyMessages.length} messages, ~${historyWordCount} words`);
+
     return [
         {
             role: "system",
             content: "You are an academic assistant. Use ALL relevant context to answer.\nIf the answer contains multiple points, list ALL of them completely.\nDo NOT omit important parts.\nDo NOT hallucinate beyond context."
         },
+        ...historyMessages,
         {
             role: "user",
             content: `Context:\n${joinedContext}\n\nQuestion:\n${question}`
@@ -70,7 +97,9 @@ export const generateAnswer = async (question, chunks) => {
         return "Not enough information found in documents.";
     }
 
-    const contextLength = messages[1].content.split(/\s+/).length;
+    // The user content message is always the last element
+    const userMessage = messages[messages.length - 1];
+    const contextLength = userMessage.content.split(/\s+/).length;
     console.log(`[LLM] Final selected chunks for context: ${chunks.length}`);
     console.log(`[LLM] Context length (words): ${contextLength}`);
 
@@ -85,35 +114,50 @@ export const generateAnswer = async (question, chunks) => {
     return response.choices[0].message.content.trim();
 };
 
-export const streamAnswer = async (question, chunks, res) => {
-    console.log(`[LLM Stream] Retrieved chunks count: ${chunks?.length || 0}`);
-    
-    const messages = buildMessages(question, chunks);
-    if (!messages) {
-        res.write("Not enough information found in documents.");
-        res.end();
-        return;
+export const streamAnswer = async (question, chunks, chatHistory, res) => {
+    // HARD VALIDATION: res must be a writable response object
+    if (!res || typeof res.write !== "function") {
+        throw new Error("Invalid res object passed to streamAnswer");
     }
 
-    const contextLength = messages[1].content.split(/\s+/).length;
+    console.log(`[LLM Stream] Retrieved chunks count: ${chunks?.length || 0}`);
+    
+    const messages = buildMessages(question, chunks, chatHistory);
+    if (!messages) {
+        return "Not enough information found in documents.";
+    }
+
+    // The user content message is always the last element
+    const userMessage = messages[messages.length - 1];
+    const contextLength = userMessage.content.split(/\s+/).length;
     console.log(`[LLM Stream] Final selected chunks for context: ${chunks.length}`);
     console.log(`[LLM Stream] Context length (words): ${contextLength}`);
 
-    console.time("LLM Stream Time");
-    const stream = await getClient().chat.completions.create({
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        stream: true,
-        messages
-    });
+    let fullAnswer = "";
+    try {
+        console.time("LLM Stream Time");
+        const stream = await getClient().chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0.2,
+            stream: true,
+            messages
+        });
 
-    for await (const chunk of stream) {
-        const token = chunk.choices?.[0]?.delta?.content;
-        if (token) {
-            res.write(token);
+        for await (const chunk of stream) {
+            const token = chunk.choices?.[0]?.delta?.content;
+            if (token) {
+                res.write(token);
+                fullAnswer += token;
+            }
         }
+        console.timeEnd("LLM Stream Time");
+    } catch (err) {
+        console.error("STREAM ERROR:", err);
+        if (!res.writableEnded) {
+            res.write("Error generating response.");
+        }
+        fullAnswer = fullAnswer || "Error generating response.";
     }
-    console.timeEnd("LLM Stream Time");
-
-    res.end();
+    // NOTE: res.end() is NOT called here — the controller manages stream lifecycle
+    return fullAnswer;
 };
