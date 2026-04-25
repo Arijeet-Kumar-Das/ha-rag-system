@@ -91,7 +91,7 @@ ha-rag-academic-assistant/
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-username/ha-rag-academic-assistant.git
+git clone https://github.com/Arijeet-Kumar-Das/ha-rag-system
 cd ha-rag-academic-assistant
 ```
 
