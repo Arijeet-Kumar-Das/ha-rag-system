@@ -1,9 +1,14 @@
-import fs from "fs";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
-export const extractTextFromPDF = async (filePath) => {
-    const data = new Uint8Array(fs.readFileSync(filePath));
-
+/**
+ * Extract text from a PDF buffer (Uint8Array or Buffer).
+ * No filesystem dependency — works with in-memory data from Cloudinary.
+ *
+ * @param {Buffer|Uint8Array} pdfBuffer - The raw PDF bytes.
+ * @returns {Promise<string>} Extracted text from all pages.
+ */
+export const extractTextFromPDF = async (pdfBuffer) => {
+    const data = new Uint8Array(pdfBuffer);
     const pdf = await pdfjsLib.getDocument({ data }).promise;
 
     let fullText = "";
@@ -12,7 +17,7 @@ export const extractTextFromPDF = async (filePath) => {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
 
-        const strings = content.items.map(item => item.str);
+        const strings = content.items.map((item) => item.str);
         fullText += strings.join(" ") + "\n";
     }
 

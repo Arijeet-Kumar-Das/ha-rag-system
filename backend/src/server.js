@@ -1,8 +1,7 @@
-import dotenv from "dotenv";
+import 'dotenv/config';
+
 import app from "./app.js";
 import connectDB from "./config/db.js";
-
-dotenv.config();
 
 // Global Error Handlers 
 process.on("unhandledRejection", (err) => {
@@ -15,7 +14,6 @@ process.on("uncaughtException", (err) => {
 });
 
 const PORT = process.env.PORT || 5000;
-
 
 const startServer = async () => {
     await connectDB();
