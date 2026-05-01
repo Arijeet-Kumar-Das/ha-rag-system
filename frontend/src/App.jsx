@@ -1,114 +1,58 @@
-import React, { useState } from 'react'
-import MainLayout from './layout/MainLayout'
-import Home from './pages/Home'
-import Chat from './components/Chat'
-import { getDocuments, getChatsByDocument, deleteChat } from './api'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import LandingPage from './pages/LandingPage';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import DashboardPage from './pages/DashboardPage';
+import ChatPage from './pages/ChatPage';
+
+// Redirect authenticated users away from auth pages
+const AuthRoute = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#08080e]">
+        <div className="relative h-12 w-12">
+          <div className="absolute inset-0 rounded-full border-2 border-violet-500/20"></div>
+          <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-violet-500"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
 
 const App = () => {
-  const [mode, setMode] = useState('home')
-  const [pendingPrompt, setPendingPrompt] = useState('')
-  const [documents, setDocuments] = useState([])
-  const [selectedDocumentId, setSelectedDocumentId] = useState(null)
-  const [chats, setChats] = useState([])
-  const [selectedChatId, setSelectedChatId] = useState(null)
-
-  const fetchDocs = async () => {
-    try {
-      const docs = await getDocuments();
-      setDocuments(docs);
-      if (docs.length === 0) {
-        setSelectedDocumentId(null);
-        return;
-      }
-
-      const hasSelected = selectedDocumentId && docs.some((doc) => doc._id === selectedDocumentId);
-      if (!hasSelected) {
-        setSelectedDocumentId(docs[0]._id);
-      }
-    } catch (err) {
-      console.error("Failed to load documents", err);
-    }
-  }
-
-  React.useEffect(() => {
-    fetchDocs();
-  }, [])
-
-  const fetchChats = async () => {
-    if (!selectedDocumentId) {
-      setChats([]);
-      return;
-    }
-    try {
-      const data = await getChatsByDocument(selectedDocumentId);
-      setChats(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  React.useEffect(() => {
-    fetchChats();
-    setSelectedChatId(null);
-  }, [selectedDocumentId])
-
-  const startChat = (prompt = '') => {
-    setSelectedChatId(null)
-    setPendingPrompt(prompt)
-    setMode('chat')
-  }
-
-  const handleNewChat = () => {
-    setSelectedChatId(null)
-    setMode('chat')
-  }
-
-  const handleDeleteChat = async (chatId) => {
-    try {
-      await deleteChat(chatId);
-      setChats(prev => prev.filter(c => c._id !== chatId));
-      if (selectedChatId === chatId) {
-        setSelectedChatId(null);
-      }
-    } catch (err) {
-      console.error("Failed to delete chat", err);
-    }
-  }
-
-  // Find selected document name for display
-  const selectedDocName = documents.find(d => d._id === selectedDocumentId)?.fileName || null
-
   return (
-    <MainLayout
-      mode={mode}
-      setMode={setMode}
-      startChat={startChat}
-      documents={documents}
-      selectedDocumentId={selectedDocumentId}
-      setSelectedDocumentId={setSelectedDocumentId}
-      chats={chats}
-      selectedChatId={selectedChatId}
-      setSelectedChatId={setSelectedChatId}
-      onNewChat={handleNewChat}
-      onDeleteChat={handleDeleteChat}
-      selectedDocName={selectedDocName}
-    >
-      {mode === 'home' ? (
-        <Home setMode={setMode} startChat={startChat} />
-      ) : (
-        <Chat
-          pendingPrompt={pendingPrompt}
-          clearPendingPrompt={() => setPendingPrompt('')}
-          selectedDocumentId={selectedDocumentId}
-          fetchDocs={fetchDocs}
-          selectedChatId={selectedChatId}
-          setSelectedChatId={setSelectedChatId}
-          fetchChats={fetchChats}
-          selectedDocName={selectedDocName}
-        />
-      )}
-    </MainLayout>
-  )
-}
+    <ThemeProvider>
+      <AuthProvider>
+        <Router>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<AuthRoute><LoginPage /></AuthRoute>} />
+            <Route path="/register" element={<AuthRoute><RegisterPage /></AuthRoute>} />
 
-export default App
+            {/* Protected routes */}
+            <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+            <Route path="/chat/:docId" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+            <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+
+            {/* Catch-all */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
+  );
+};
+
+export default App;

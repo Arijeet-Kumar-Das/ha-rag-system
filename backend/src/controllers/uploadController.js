@@ -14,7 +14,7 @@ export const uploadPDF = async (req, res) => {
 
         const fileName = req.file.originalname;
         const index = getIndex();
-        const userId = "anonymous";
+        const userId = req.user?._id?.toString() || "anonymous";
         const DOC_LIMIT = process.env.MAX_DOCUMENTS_PER_USER ? parseInt(process.env.MAX_DOCUMENTS_PER_USER) : 10;
 
         // 1. Storage Limiting and Duplicate Handling

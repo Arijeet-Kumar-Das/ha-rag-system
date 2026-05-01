@@ -1,9 +1,11 @@
 import express from "express";
 import cors from "cors";
+import authRoutes from "./routes/authRoutes.js";
 import uploadRoutes from "./routes/uploadRoutes.js"
 import askRoutes from "./routes/askRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
+import { protect } from "./middleware/authMiddleware.js";
 
 const app = express();
 
@@ -12,10 +14,14 @@ app.use(cors({
 }));
 app.use(express.json());
 
-app.use("/api/upload", uploadRoutes);
-app.use("/api/ask", askRoutes);
-app.use("/api/document", documentRoutes);
-app.use("/api/chat", chatRoutes);
+// Public routes
+app.use("/api/auth", authRoutes);
+
+// Protected routes — require JWT
+app.use("/api/upload", protect, uploadRoutes);
+app.use("/api/ask", protect, askRoutes);
+app.use("/api/document", protect, documentRoutes);
+app.use("/api/chat", protect, chatRoutes);
 
 app.get("/", (req, res) => {
     res.send("HA-RAG API Running 🚀");

@@ -4,7 +4,8 @@ import Chunk from "../models/Chunk.js";
 
 export const getDocuments = async (req, res) => {
     try {
-        const docs = await Document.find({ userId: "anonymous" })
+        const userId = req.user?._id?.toString() || "anonymous";
+        const docs = await Document.find({ userId })
             .select("_id fileName namespace uploadDate chunkCount")
             .sort({ uploadDate: -1 });
         res.json(docs);

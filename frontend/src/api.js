@@ -1,5 +1,14 @@
 const API_BASE = "/api";
 
+/** Get the stored JWT token */
+const getToken = () => localStorage.getItem("ha_rag_token");
+
+/** Build auth headers */
+const authHeaders = (extra = {}) => ({
+  Authorization: `Bearer ${getToken()}`,
+  ...extra,
+});
+
 /**
  * Stream an answer from the RAG backend.
  * Calls onToken for each chunk of text received.
@@ -8,7 +17,7 @@ const API_BASE = "/api";
 export const askQuestion = async (question, documentId, chatId, onToken, mode = "standard") => {
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ question, documentId, chatId, mode }),
   });
 
@@ -106,6 +115,7 @@ export const uploadFile = async (file, onProgress) => {
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
     body: formData,
   });
 
@@ -121,7 +131,9 @@ export const uploadFile = async (file, onProgress) => {
  * Fetch all available documents for the workspace.
  */
 export const getDocuments = async () => {
-  const res = await fetch(`${API_BASE}/document`);
+  const res = await fetch(`${API_BASE}/document`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to fetch documents");
@@ -133,19 +145,26 @@ export const getDocuments = async () => {
  * Chat APIs
  */
 export const getChatsByDocument = async (documentId) => {
-  const res = await fetch(`${API_BASE}/chat/${documentId}`);
+  const res = await fetch(`${API_BASE}/chat/${documentId}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to fetch chats");
   return res.json();
 };
 
 export const getChatMessages = async (chatId) => {
-  const res = await fetch(`${API_BASE}/chat/detail/${chatId}`);
+  const res = await fetch(`${API_BASE}/chat/detail/${chatId}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to fetch messages");
   return res.json();
 };
 
 export const deleteChat = async (chatId) => {
-  const res = await fetch(`${API_BASE}/chat/${chatId}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE}/chat/${chatId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to delete chat");
   return res.json();
 };
