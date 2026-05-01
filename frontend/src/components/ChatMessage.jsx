@@ -1,4 +1,5 @@
-import SourceCard from "./SourceCard"
+import SourceCard from "./SourceCard";
+import { useTheme } from '../context/ThemeContext';
 
 function VerificationBadge({ verification }) {
   if (!verification) return null
@@ -57,13 +58,14 @@ function VerificationBadge({ verification }) {
 }
 
 export default function ChatMessage({ message }) {
-  const isUser = message.role === "user"
+  const { isDark, t } = useTheme();
+  const isUser = message.role === "user";
 
   return (
     <div className={`flex w-full gap-3 py-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {/* Assistant avatar */}
       {!isUser && (
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400">
+        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? 'bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400' : 'bg-indigo-100 text-indigo-600'}`}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4Z" />
           </svg>
@@ -72,7 +74,7 @@ export default function ChatMessage({ message }) {
 
       <div className={`flex max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
         {/* Role label */}
-        <span className={`mb-1 text-[10px] font-medium uppercase tracking-wider ${isUser ? 'text-white/25' : 'text-violet-400/60'}`}>
+        <span className={`mb-1 text-[10px] font-medium uppercase tracking-wider ${isUser ? t.textFaint : (isDark ? 'text-violet-400/60' : 'text-indigo-500/80')}`}>
           {isUser ? 'You' : 'Assistant'}
         </span>
 
@@ -81,7 +83,7 @@ export default function ChatMessage({ message }) {
           className={`relative rounded-2xl px-4 py-3 text-[14px] leading-7 whitespace-pre-wrap transition-all duration-200
             ${isUser
               ? "rounded-br-md bg-gradient-to-br from-violet-600/90 to-indigo-600/90 text-white shadow-[0_4px_20px_rgba(139,92,246,0.2)]"
-              : "rounded-bl-md border border-white/[0.06] bg-white/[0.03] text-white/85"
+              : `rounded-bl-md border ${t.border} ${isDark ? 'bg-white/[0.03] text-white/85' : 'bg-white text-slate-700 shadow-sm'}`
             }`}
         >
           {message.content || ""}
@@ -102,7 +104,7 @@ export default function ChatMessage({ message }) {
 
       {/* User avatar */}
       {isUser && (
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-white/40">
+        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? 'bg-white/[0.06] text-white/40' : 'bg-slate-200 text-slate-500'}`}>
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="8" r="4" /><path d="M20 21a8 8 0 10-16 0" />
           </svg>
