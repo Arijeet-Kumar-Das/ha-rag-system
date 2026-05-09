@@ -9,6 +9,11 @@ import Message from "../models/Message.js";
 
 export const askQuestion = async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+        const userId = req.user._id.toString();
+
         const { question, documentId, chatId, mode = "standard" } = req.body;
         console.log("[ASK] Mode:", mode);
 
@@ -30,12 +35,17 @@ export const askQuestion = async (req, res) => {
                 return res.status(404).json({ error: "Selected document not found" });
             }
 
+            // Verify the document belongs to the current user
+            if (doc.userId !== userId) {
+                return res.status(403).json({ error: "Not authorized to access this document" });
+            }
+
             namespace = doc.namespace;
             console.log("Namespace:", namespace);
 
             targetDocumentId = doc._id;
         } else {
-            const latestDoc = await Document.findOne().sort({ uploadDate: -1 });
+            const latestDoc = await Document.findOne({ userId }).sort({ uploadDate: -1 });
             if (latestDoc) {
                 targetDocumentId = latestDoc._id;
                 namespace = latestDoc.namespace;
@@ -54,12 +64,18 @@ export const askQuestion = async (req, res) => {
         if (targetChatId) {
             const chat = await Chat.findById(targetChatId);
             if (!chat) return res.status(404).json({ error: "Chat not found" });
+
+            // Verify the chat belongs to the current user
+            if (chat.userId !== userId) {
+                return res.status(403).json({ error: "Not authorized to access this chat" });
+            }
+
             // Load history BEFORE saving the current user message to avoid duplicates
             chatHistory = await Message.find({ chatId: targetChatId }).sort({ createdAt: 1 });
             console.log("chatHistory length:", chatHistory.length);
         } else {
             const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
-            const newChat = await Chat.create({ title: title || "New Chat", documentId: targetDocumentId });
+            const newChat = await Chat.create({ title: title || "New Chat", documentId: targetDocumentId, userId });
             targetChatId = newChat._id;
         }
 

@@ -20,7 +20,10 @@ export const uploadPDF = async (req, res) => {
         console.log(`[UPLOAD] File received: ${fileName} (${pdfBuffer.length} bytes)`);
 
         const index = getIndex();
-        const userId = req.user?._id?.toString() || "anonymous";
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+        const userId = req.user._id.toString();
         const DOC_LIMIT = process.env.MAX_DOCUMENTS_PER_USER
             ? parseInt(process.env.MAX_DOCUMENTS_PER_USER)
             : 10;

@@ -4,7 +4,10 @@ import Chunk from "../models/Chunk.js";
 
 export const getDocuments = async (req, res) => {
     try {
-        const userId = req.user?._id?.toString() || "anonymous";
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+        const userId = req.user._id.toString();
         const docs = await Document.find({ userId })
             .select("_id fileName namespace uploadDate chunkCount")
             .sort({ uploadDate: -1 });
@@ -17,6 +20,10 @@ export const getDocuments = async (req, res) => {
 
 export const deleteDocument = async (req, res) => {
     try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+        const userId = req.user._id.toString();
         const { id } = req.params; // This is the namespace
 
         if (!id) {
@@ -26,6 +33,11 @@ export const deleteDocument = async (req, res) => {
         const doc = await Document.findOne({ namespace: id });
         if (!doc) {
             return res.status(404).json({ error: "Document not found" });
+        }
+
+        // Ownership check — prevent users from deleting other users' documents
+        if (doc.userId !== userId) {
+            return res.status(403).json({ error: "Not authorized to delete this document" });
         }
 
         // 1. Delete from Pinecone
@@ -50,3 +62,4 @@ export const deleteDocument = async (req, res) => {
         return res.status(500).json({ error: "Failed to delete document" });
     }
 };
+
