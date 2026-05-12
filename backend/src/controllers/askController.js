@@ -1,19 +1,47 @@
 import { retrieveRelevantChunks } from "../services/retrievalService.js";
-import { generateAnswer, streamAnswer } from "../services/llmService.js";
+import { streamAnswer } from "../services/llmService.js";
 import { verifyAnswer } from "../services/verificationService.js";
 import { getCache, setCache } from "../services/cacheService.js";
 import { classifyQuery } from "../services/classificationService.js";
+import { createSseStream } from "../utils/sse.js";
 import Document from "../models/Document.js";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
 
+const persistAssistantMessage = async (chatId, content, sources = []) => {
+    await Message.create({
+        chatId,
+        role: "assistant",
+        content,
+        sources
+    });
+    await Chat.findByIdAndUpdate(chatId, { updatedAt: new Date() });
+};
+
+const streamStaticAnswer = async (stream, chatId, answer, sources = [], verification = null) => {
+    stream.send("token", { text: answer });
+    stream.send("sources", { sources, verification });
+    stream.send("done", { answer });
+    stream.close();
+
+    await persistAssistantMessage(chatId, answer, sources);
+};
+
+const streamError = (stream, message) => {
+    stream.send("error", { message });
+    stream.close();
+};
+
 export const askQuestion = async (req, res) => {
+    let stream = null;
+    const abortController = new AbortController();
+
     try {
         if (!req.user) {
             return res.status(401).json({ error: "Authentication required" });
         }
-        const userId = req.user._id.toString();
 
+        const userId = req.user._id.toString();
         const { question, documentId, chatId, mode = "standard" } = req.body;
         console.log("[ASK] Mode:", mode);
 
@@ -24,7 +52,6 @@ export const askQuestion = async (req, res) => {
         console.log("question:", question);
         console.log("documentId:", documentId);
 
-        // Determine which namespace to query
         let namespace = null;
         let targetDocumentId = documentId;
 
@@ -35,15 +62,13 @@ export const askQuestion = async (req, res) => {
                 return res.status(404).json({ error: "Selected document not found" });
             }
 
-            // Verify the document belongs to the current user
             if (doc.userId !== userId) {
                 return res.status(403).json({ error: "Not authorized to access this document" });
             }
 
             namespace = doc.namespace;
-            console.log("Namespace:", namespace);
-
             targetDocumentId = doc._id;
+            console.log("Namespace:", namespace);
         } else {
             const latestDoc = await Document.findOne({ userId }).sort({ uploadDate: -1 });
             if (latestDoc) {
@@ -51,13 +76,12 @@ export const askQuestion = async (req, res) => {
                 namespace = latestDoc.namespace;
                 console.log(`[ASK] No documentId provided, defaulting to latest: ${namespace}`);
             } else {
-                console.log(`[ASK] No documentId provided and no documents found in DB. Retrieval might fail.`);
+                console.log("[ASK] No documentId provided and no documents found in DB. Retrieval might fail.");
             }
         }
 
         console.log("Resolved namespace:", namespace);
 
-        // Handle Chat creation/lookup
         let targetChatId = chatId;
         let chatHistory = [];
 
@@ -65,12 +89,10 @@ export const askQuestion = async (req, res) => {
             const chat = await Chat.findById(targetChatId);
             if (!chat) return res.status(404).json({ error: "Chat not found" });
 
-            // Verify the chat belongs to the current user
             if (chat.userId !== userId) {
                 return res.status(403).json({ error: "Not authorized to access this chat" });
             }
 
-            // Load history BEFORE saving the current user message to avoid duplicates
             chatHistory = await Message.find({ chatId: targetChatId }).sort({ createdAt: 1 });
             console.log("chatHistory length:", chatHistory.length);
         } else {
@@ -79,7 +101,6 @@ export const askQuestion = async (req, res) => {
             targetChatId = newChat._id;
         }
 
-        // Save User Message AFTER loading history so it doesn't appear in chatHistory
         await Message.create({
             chatId: targetChatId,
             role: "user",
@@ -87,56 +108,44 @@ export const askQuestion = async (req, res) => {
         });
 
         res.setHeader("X-Chat-Id", targetChatId.toString());
+        stream = createSseStream(req, res);
+        stream.send("meta", { chatId: targetChatId.toString() });
 
-        // 0. Check cache first
+        req.on("close", () => abortController.abort());
+
         const cached = getCache(question, namespace);
         if (cached) {
             console.log("CACHE HIT:", question, "for namespace:", namespace);
-            
-            // Save Assistant Message from cache
-            await Message.create({
-                chatId: targetChatId,
-                role: "assistant",
-                content: cached.answer,
-                sources: cached.sources
-            });
-            await Chat.findByIdAndUpdate(targetChatId, { updatedAt: new Date() });
-
-            return res.json(cached);
+            await streamStaticAnswer(
+                stream,
+                targetChatId,
+                cached.answer,
+                cached.sources || [],
+                cached.verification || null
+            );
+            return;
         }
 
-        // 1. Classify query
+        stream.send("status", { stage: "classifying" });
         const queryType = await classifyQuery(question);
         console.log("QUERY TYPE:", queryType);
 
         if (queryType === "DB") {
-            const dbAnswer = "This will be fetched from database";
-            await Message.create({ chatId: targetChatId, role: "assistant", content: dbAnswer });
-            await Chat.findByIdAndUpdate(targetChatId, { updatedAt: new Date() });
-            
-            return res.json({
-                answer: dbAnswer,
-                sources: []
-            });
+            await streamStaticAnswer(stream, targetChatId, "This will be fetched from database", []);
+            return;
         }
 
         const startTime = Date.now();
 
+        stream.send("status", { stage: "retrieving" });
         console.time("Retrieval");
-        // 2. Retrieve chunks (RAG path)
         const chunks = await retrieveRelevantChunks(question, namespace);
         console.timeEnd("Retrieval");
         console.log("chunks length:", chunks?.length);
 
         if (!chunks || chunks.length === 0) {
-            const emptyAnswer = "No relevant information found";
-            await Message.create({ chatId: targetChatId, role: "assistant", content: emptyAnswer });
-            await Chat.findByIdAndUpdate(targetChatId, { updatedAt: new Date() });
-
-            return res.json({
-                answer: emptyAnswer,
-                sources: []
-            });
+            await streamStaticAnswer(stream, targetChatId, "No relevant information found", []);
+            return;
         }
 
         const context = chunks
@@ -147,95 +156,79 @@ export const askQuestion = async (req, res) => {
         console.log("Chunks used:", chunks.length);
 
         if (!context || context.trim().length === 0) {
-            const contextAnswer = "No usable context found.";
-            await Message.create({ chatId: targetChatId, role: "assistant", content: contextAnswer });
-            await Chat.findByIdAndUpdate(targetChatId, { updatedAt: new Date() });
-
-            return res.json({
-                answer: contextAnswer,
-                sources: []
-            });
+            await streamStaticAnswer(stream, targetChatId, "No usable context found.", []);
+            return;
         }
 
-        // Build sources before streaming
         const sources = chunks.map(c => ({
             text: c.text,
             fileName: c.fileName,
             chunkIndex: c.chunkIndex
         }));
 
-        // Only put lightweight metadata in header (no chunk text) to avoid Header overflow
-        const sourceMeta = sources.map(s => ({
-            fileName: s.fileName,
-            chunkIndex: s.chunkIndex
-        }));
-
-        // Set streaming headers BEFORE calling streamAnswer
-        res.setHeader("Content-Type", "text/plain");
-        res.setHeader("Transfer-Encoding", "chunked");
-        res.setHeader("X-Sources", encodeURIComponent(JSON.stringify(sourceMeta)));
-        res.flushHeaders();
-
         let fullAnswer = "";
         let verification = null;
+
         try {
             console.log("Streaming started");
-            console.time("LLM Streaming");
-            fullAnswer = await streamAnswer(question, chunks, chatHistory || [], res);
-            console.timeEnd("LLM Streaming");
+            fullAnswer = await streamAnswer(
+                question,
+                chunks,
+                chatHistory,
+                (token) => stream.send("token", { text: token }),
+                { signal: abortController.signal }
+            );
             console.log("Streaming finished");
-
-            // Run verification if mode is "verified"
-            if (mode === "verified" && fullAnswer && fullAnswer !== "Error generating response") {
-                console.time("Verification");
-                verification = await verifyAnswer(question, fullAnswer, chunks);
-                console.timeEnd("Verification");
-                console.log("Verification:", verification.confidence);
-            }
-
-            // Append sources + verification as a delimiter at the end of the stream body
-            // Frontend will split on __SOURCES__ to extract them
-            if (!res.writableEnded) {
-                const payload = { sources, verification };
-                res.write(`\n\n__SOURCES__${JSON.stringify(payload)}`);
-            }
         } catch (err) {
-            console.error("ASK CONTROLLER ERROR:", err);
+            if (abortController.signal.aborted || stream.isClosed()) {
+                console.log("[ASK] Client disconnected during streaming");
+                return;
+            }
 
-            if (!res.headersSent) {
-                return res.status(500).json({ error: "Streaming failed" });
-            }
-            fullAnswer = "Error generating response";
-        } finally {
-            // Always end the response
-            if (!res.writableEnded) {
-                res.end();
-            }
+            throw err;
         }
-        
-        // Save Assistant Message
+
+        if (abortController.signal.aborted || stream.isClosed()) {
+            console.log("[ASK] Client disconnected before stream completion");
+            return;
+        }
+
+        if (!fullAnswer) {
+            fullAnswer = "I couldn't generate a response.";
+            stream.send("token", { text: fullAnswer });
+        }
+
+        if (mode === "verified" && fullAnswer) {
+            stream.send("status", { stage: "verifying" });
+            console.time("Verification");
+            verification = await verifyAnswer(question, fullAnswer, chunks);
+            console.timeEnd("Verification");
+            console.log("Verification:", verification.confidence);
+        }
+
+        stream.send("sources", { sources, verification });
+        stream.send("done", { answer: fullAnswer });
+        stream.close();
+
         if (fullAnswer) {
-            await Message.create({
-                chatId: targetChatId,
-                role: "assistant",
-                content: fullAnswer,
-                sources: sources
-            });
-            await Chat.findByIdAndUpdate(targetChatId, { updatedAt: new Date() });
-        }
-
-        // Cache the answer
-        if (fullAnswer && fullAnswer !== "Error generating response") {
-            setCache(question, { answer: fullAnswer, sources }, namespace);
+            await persistAssistantMessage(targetChatId, fullAnswer, sources);
+            setCache(question, { answer: fullAnswer, sources, verification }, namespace);
         }
 
         console.log(`Total RAG request time: ${Date.now() - startTime}ms`);
-
     } catch (error) {
         console.error("ASK ERROR:", error);
+
+        if (stream && !stream.isClosed()) {
+            streamError(stream, "Streaming failed");
+            return;
+        }
+
         if (!res.headersSent) {
-            res.status(500).json({ error: "Streaming failed" });
-        } else if (!res.writableEnded) {
+            return res.status(500).json({ error: "Streaming failed" });
+        }
+
+        if (!res.writableEnded) {
             res.end();
         }
     }

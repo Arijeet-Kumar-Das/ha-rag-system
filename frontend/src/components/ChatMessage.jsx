@@ -87,6 +87,9 @@ export default function ChatMessage({ message }) {
             }`}
         >
           {message.content || ""}
+          {message.streaming && (
+            <span aria-hidden="true" className="ml-1 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-current opacity-70" />
+          )}
         </div>
 
         {/* Verification badge */}

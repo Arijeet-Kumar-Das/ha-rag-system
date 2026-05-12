@@ -11,6 +11,7 @@ const app = express();
 
 app.use(cors({
     origin: "*",
+    exposedHeaders: ["X-Chat-Id"],
 }));
 app.use(express.json());
 

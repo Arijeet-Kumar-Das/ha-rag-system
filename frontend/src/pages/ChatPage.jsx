@@ -11,7 +11,7 @@ import logo from '../assets/logo.png';
 export default function ChatPage() {
   const { docId } = useParams();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const { isDark, t } = useTheme();
 
   const [documents, setDocuments] = useState([]);
@@ -22,6 +22,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [mode, setMode] = useState('standard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -50,7 +51,7 @@ export default function ChatPage() {
 
   const fetchChats = useCallback(async () => {
     if (!selectedDocumentId) { setChats([]); return; }
-    try { setChats(await getChatsByDocument(selectedDocumentId)); } catch {}
+    try { setChats(await getChatsByDocument(selectedDocumentId)); } catch (err) { console.error('Failed to load chats', err); }
   }, [selectedDocumentId]);
 
   useEffect(() => { fetchChats(); setSelectedChatId(null); }, [selectedDocumentId, fetchChats]);
@@ -78,10 +79,10 @@ export default function ChatPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || isStreaming) return;
     let resolvedDocumentId = selectedDocumentId;
     if (!resolvedDocumentId) {
-      try { const docs = await getDocuments(); if (docs?.length > 0) resolvedDocumentId = [...docs].sort((a, b) => new Date(b.uploadDate || 0) - new Date(a.uploadDate || 0))[0]._id; } catch {}
+      try { const docs = await getDocuments(); if (docs?.length > 0) resolvedDocumentId = [...docs].sort((a, b) => new Date(b.uploadDate || 0) - new Date(a.uploadDate || 0))[0]._id; } catch (err) { console.error('Failed to resolve latest document', err); }
     }
     if (!resolvedDocumentId) { setMessages(p => [...p, { role: 'assistant', content: 'Please select or upload a document first.' }]); return; }
 
@@ -89,22 +90,63 @@ export default function ChatPage() {
     setInput('');
     setMessages(p => [...p, { role: 'user', content: userText }]);
     setIsLoading(true);
+    setIsStreaming(true);
     let isFirstToken = true;
+    let assistantStarted = false;
 
     try {
       const result = await askQuestion(userText, resolvedDocumentId, selectedChatId, (token, src) => {
         if (isFirstToken) {
           setIsLoading(false); isFirstToken = false;
+          assistantStarted = true;
           setMessages(p => [...p, { role: 'assistant', content: token, streaming: true, sources: src || [] }]);
         } else {
           setMessages(p => { const n = [...p]; n[n.length - 1] = { ...n[n.length - 1], content: n[n.length - 1].content + token }; return n; });
         }
       }, mode);
-      setMessages(p => { const n = [...p]; n[n.length - 1] = { ...n[n.length - 1], streaming: false, sources: result?.sources || n[n.length - 1].sources, verification: result?.verification || null }; return n; });
+      setIsLoading(false);
+      setIsStreaming(false);
+      setMessages(p => {
+        const n = [...p];
+        if (!assistantStarted) {
+          n.push({
+            role: 'assistant',
+            content: result?.answer || '',
+            streaming: false,
+            sources: result?.sources || [],
+            verification: result?.verification || null
+          });
+          return n;
+        }
+
+        const lastIdx = n.length - 1;
+        n[lastIdx] = {
+          ...n[lastIdx],
+          streaming: false,
+          sources: result?.sources || n[lastIdx].sources,
+          verification: result?.verification || null
+        };
+        return n;
+      });
       if (result?.chatId && result.chatId !== selectedChatId) { skipReload.current = true; setSelectedChatId(result.chatId); fetchChats(); }
     } catch (err) {
       setIsLoading(false);
-      setMessages(p => [...p, { role: 'assistant', content: `Error: ${err.message}` }]);
+      setIsStreaming(false);
+      setMessages(p => {
+        const n = [...p];
+        const lastIdx = n.length - 1;
+
+        if (assistantStarted && n[lastIdx]?.role === 'assistant') {
+          n[lastIdx] = {
+            ...n[lastIdx],
+            streaming: false,
+            content: `${n[lastIdx].content}\n\nError: ${err.message}`
+          };
+          return n;
+        }
+
+        return [...n, { role: 'assistant', content: `Error: ${err.message}` }];
+      });
     }
   };
 
@@ -121,7 +163,7 @@ export default function ChatPage() {
   };
 
   const handleDeleteChat = async (chatId) => {
-    try { await deleteChat(chatId); setChats(p => p.filter(c => c._id !== chatId)); if (selectedChatId === chatId) setSelectedChatId(null); } catch {}
+    try { await deleteChat(chatId); setChats(p => p.filter(c => c._id !== chatId)); if (selectedChatId === chatId) setSelectedChatId(null); } catch (err) { console.error('Failed to delete chat', err); }
   };
 
   return (
@@ -278,8 +320,8 @@ export default function ChatPage() {
             </div>
 
             {/* Upload */}
-            <input type="file" accept="application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} disabled={isUploading || isLoading} />
-            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isLoading}
+            <input type="file" accept="application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} disabled={isUploading || isLoading || isStreaming} />
+            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading || isLoading || isStreaming}
               className={`flex h-8 items-center gap-1.5 rounded-lg border ${t.border} px-2 sm:px-3 text-[12px] font-medium ${t.textSub} transition-all ${t.borderHover} ${t.bgHover} disabled:opacity-40`}
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
@@ -308,9 +350,9 @@ export default function ChatPage() {
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
                   placeholder={mode === 'verified' ? 'Ask (verified mode — slower, higher confidence)...' : 'Ask a question about your document...'}
                   className={`min-h-[44px] max-h-36 w-full resize-none bg-transparent px-2.5 py-2 text-[14px] leading-6 ${t.text} outline-none ${isDark ? 'placeholder:text-white/25' : 'placeholder:text-slate-400'}`}
-                  rows={1} disabled={isLoading}
+                  rows={1} disabled={isLoading || isStreaming}
                 />
-                <button type="submit" disabled={!input.trim() || isLoading}
+                <button type="submit" disabled={!input.trim() || isLoading || isStreaming}
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-md transition-all hover:shadow-lg disabled:opacity-30 disabled:shadow-none
                     ${mode === 'verified' ? 'bg-gradient-to-br from-emerald-500 to-teal-600' : `bg-gradient-to-br ${t.gradient}`}`}
                 >

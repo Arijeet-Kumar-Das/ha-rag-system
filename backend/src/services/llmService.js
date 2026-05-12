@@ -114,10 +114,9 @@ export const generateAnswer = async (question, chunks) => {
     return response.choices[0].message.content.trim();
 };
 
-export const streamAnswer = async (question, chunks, chatHistory, res) => {
-    // HARD VALIDATION: res must be a writable response object
-    if (!res || typeof res.write !== "function") {
-        throw new Error("Invalid res object passed to streamAnswer");
+export const streamAnswer = async (question, chunks, chatHistory = [], onToken, options = {}) => {
+    if (typeof onToken !== "function") {
+        throw new Error("streamAnswer requires an onToken callback");
     }
 
     console.log(`[LLM Stream] Retrieved chunks count: ${chunks?.length || 0}`);
@@ -134,30 +133,28 @@ export const streamAnswer = async (question, chunks, chatHistory, res) => {
     console.log(`[LLM Stream] Context length (words): ${contextLength}`);
 
     let fullAnswer = "";
+    console.time("LLM Stream Time");
     try {
-        console.time("LLM Stream Time");
+        const requestOptions = options.signal ? { signal: options.signal } : undefined;
         const stream = await getClient().chat.completions.create({
             model: "gpt-4o-mini",
             temperature: 0.2,
             stream: true,
             messages
-        });
+        }, requestOptions);
 
         for await (const chunk of stream) {
+            if (options.signal?.aborted) break;
+
             const token = chunk.choices?.[0]?.delta?.content;
             if (token) {
-                res.write(token);
+                onToken(token);
                 fullAnswer += token;
             }
         }
+    } finally {
         console.timeEnd("LLM Stream Time");
-    } catch (err) {
-        console.error("STREAM ERROR:", err);
-        if (!res.writableEnded) {
-            res.write("Error generating response.");
-        }
-        fullAnswer = fullAnswer || "Error generating response.";
     }
-    // NOTE: res.end() is NOT called here — the controller manages stream lifecycle
-    return fullAnswer;
+
+    return fullAnswer.trim();
 };

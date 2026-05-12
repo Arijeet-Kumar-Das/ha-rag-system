@@ -9,6 +9,83 @@ const authHeaders = (extra = {}) => ({
   ...extra,
 });
 
+const scheduleTokenFlush = (flush) => {
+  if (typeof requestAnimationFrame === "function") {
+    const frameId = requestAnimationFrame(flush);
+    return () => cancelAnimationFrame(frameId);
+  }
+
+  const timeoutId = setTimeout(flush, 16);
+  return () => clearTimeout(timeoutId);
+};
+
+const createTokenBatcher = (onToken) => {
+  let pendingText = "";
+  let latestSources = [];
+  let cancelScheduled = null;
+
+  const flush = () => {
+    cancelScheduled = null;
+    if (!pendingText) return;
+
+    const text = pendingText;
+    pendingText = "";
+    onToken?.(text, latestSources);
+  };
+
+  return {
+    push(text, sources) {
+      if (!text) return;
+
+      pendingText += text;
+      latestSources = sources || latestSources;
+
+      if (!cancelScheduled) {
+        cancelScheduled = scheduleTokenFlush(flush);
+      }
+    },
+    flushNow() {
+      if (cancelScheduled) {
+        cancelScheduled();
+        cancelScheduled = null;
+      }
+      flush();
+    },
+  };
+};
+
+const parseSseFrame = (frame) => {
+  const lines = frame.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  let event = "message";
+  const dataLines = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) continue;
+
+    const separatorIndex = line.indexOf(":");
+    const field = separatorIndex === -1 ? line : line.slice(0, separatorIndex);
+    const value = separatorIndex === -1 ? "" : line.slice(separatorIndex + 1).replace(/^ /, "");
+
+    if (field === "event") event = value;
+    if (field === "data") dataLines.push(value);
+  }
+
+  if (!dataLines.length && event === "message") return null;
+
+  const rawData = dataLines.join("\n");
+  let data = {};
+
+  if (rawData) {
+    try {
+      data = JSON.parse(rawData);
+    } catch {
+      data = { raw: rawData };
+    }
+  }
+
+  return { event, data };
+};
+
 /**
  * Stream an answer from the RAG backend.
  * Calls onToken for each chunk of text received.
@@ -17,7 +94,10 @@ const authHeaders = (extra = {}) => ({
 export const askQuestion = async (question, documentId, chatId, onToken, mode = "standard") => {
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: authHeaders({
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    }),
     body: JSON.stringify({ question, documentId, chatId, mode }),
   });
 
@@ -32,16 +112,7 @@ export const askQuestion = async (question, documentId, chatId, onToken, mode = 
 
   let sources = [];
   let verification = null;
-  try {
-    const sourcesHeader = res.headers.get("X-Sources");
-    if (sourcesHeader) {
-      sources = JSON.parse(decodeURIComponent(sourcesHeader));
-    }
-  } catch (e) {
-    console.error("Failed to parse sources header", e);
-  }
 
-  // If the response is JSON (cache hit, DB route, or error), parse it
   if (contentType.includes("application/json")) {
     const data = await res.json();
     sources = data.sources || sources;
@@ -51,65 +122,80 @@ export const askQuestion = async (question, documentId, chatId, onToken, mode = 
     return { answer: data.answer || "", sources, verification, chatId: newChatId };
   }
 
-  // Otherwise stream token-by-token
+  if (!res.body) {
+    throw new Error("Streaming is not supported by this browser");
+  }
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const batcher = createTokenBatcher(onToken);
   let full = "";
+  let finalChatId = newChatId;
+  let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const chunk = decoder.decode(value, { stream: true });
-    full += chunk;
+  const handleEvent = (parsed) => {
+    if (!parsed) return;
 
-    // Check if this chunk contains the sources delimiter
-    if (full.includes("__SOURCES__")) {
-      // Don't send the delimiter or sources JSON as tokens
-      const delimiterIndex = full.lastIndexOf("\n\n__SOURCES__");
-      const answerPart = full.substring(0, delimiterIndex);
-      // Only send the new answer content that hasn't been sent yet
-      const alreadySentLength = full.length - chunk.length;
-      if (delimiterIndex > alreadySentLength) {
-        const unsent = answerPart.substring(alreadySentLength);
-        if (unsent) onToken(unsent, sources);
-      }
+    const { event, data } = parsed;
 
-      // Parse payload from the delimiter (now contains {sources, verification})
-      try {
-        const payloadJson = full.substring(full.lastIndexOf("__SOURCES__") + "__SOURCES__".length);
-        const payload = JSON.parse(payloadJson);
-        sources = payload.sources || sources;
-        verification = payload.verification || null;
-      } catch (e) {
-        console.error("Failed to parse inline payload", e);
-      }
-      full = answerPart;
-    } else {
-      onToken(chunk, sources);
+    if (event === "meta") {
+      finalChatId = data.chatId || finalChatId;
+      return;
     }
+
+    if (event === "token") {
+      const text = data.text || "";
+      full += text;
+      batcher.push(text, sources);
+      return;
+    }
+
+    if (event === "sources") {
+      sources = data.sources || sources;
+      verification = data.verification || null;
+      return;
+    }
+
+    if (event === "done") {
+      if (!full && data.answer) full = data.answer;
+      return;
+    }
+
+    if (event === "error") {
+      throw new Error(data.message || "Streaming failed");
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() || "";
+
+      for (const frame of frames) {
+        handleEvent(parseSseFrame(frame));
+      }
+    }
+
+    buffer += decoder.decode();
+
+    if (buffer.trim()) {
+      handleEvent(parseSseFrame(buffer));
+    }
+  } finally {
+    batcher.flushNow();
   }
 
-  // Final check: if the delimiter wasn't caught mid-chunk
-  if (full.includes("__SOURCES__")) {
-    const delimiterIndex = full.lastIndexOf("\n\n__SOURCES__");
-    try {
-      const payloadJson = full.substring(full.lastIndexOf("__SOURCES__") + "__SOURCES__".length);
-      const payload = JSON.parse(payloadJson);
-      sources = payload.sources || sources;
-      verification = payload.verification || null;
-    } catch (e) {
-      console.error("Failed to parse inline payload", e);
-    }
-    full = full.substring(0, delimiterIndex);
-  }
-
-  return { answer: full, sources, verification, chatId: newChatId };
+  return { answer: full, sources, verification, chatId: finalChatId };
 };
 
 /**
  * Upload a PDF file to the backend.
  */
-export const uploadFile = async (file, onProgress) => {
+export const uploadFile = async (file) => {
   const formData = new FormData();
   formData.append("file", file);
 
