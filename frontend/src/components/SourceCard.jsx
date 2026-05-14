@@ -3,7 +3,7 @@ import { useTheme } from '../context/ThemeContext';
 
 export default function SourceCard({ sources }) {
   const [isExpanded, setIsExpanded] = useState(false)
-  const { isDark, t } = useTheme();
+  const { isDark } = useTheme();
 
   if (!sources || sources.length === 0) return null
 

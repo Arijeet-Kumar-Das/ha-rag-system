@@ -2,45 +2,103 @@ import { generateEmbedding } from "./embeddingService.js";
 import { getIndex } from "./vectorService.js";
 import { keywordSearch } from "./keywordService.js";
 
-export const retrieveRelevantChunks = async (query, namespace) => {
-    if (!namespace) {
+const normalizeTargets = (targetInput) => {
+    const input = Array.isArray(targetInput) ? targetInput : [targetInput];
+
+    return input
+        .filter(Boolean)
+        .map(target => {
+            if (typeof target === "string") {
+                return { namespace: target, documentId: null, fileName: null };
+            }
+
+            return {
+                namespace: target.namespace,
+                documentId: target.documentId || target._id || null,
+                fileName: target.fileName || null
+            };
+        })
+        .filter(target => target.namespace);
+};
+
+const getTargetMeta = (targets) => {
+    const byNamespace = new Map();
+    targets.forEach(target => byNamespace.set(target.namespace, target));
+    return byNamespace;
+};
+
+const getChunkKey = (chunk) => {
+    const namespace = chunk.namespace || "unknown";
+    if (chunk.chunkIndex !== undefined && chunk.chunkIndex !== null) {
+        return `${namespace}_${chunk.chunkIndex}`;
+    }
+    return `${namespace}_${(chunk.text || "").substring(0, 100)}`;
+};
+
+const enrichChunk = (chunk, targetMeta) => {
+    const target = targetMeta.get(chunk.namespace) || {};
+
+    return {
+        ...chunk,
+        documentId: chunk.documentId || target.documentId || null,
+        fileName: chunk.fileName || target.fileName || "unknown"
+    };
+};
+
+export const retrieveRelevantChunks = async (query, targetInput) => {
+    const targets = normalizeTargets(targetInput);
+    if (targets.length === 0) {
         return [];
     }
 
     const index = getIndex();
-    console.log("Using namespace:", namespace);
+    const targetMeta = getTargetMeta(targets);
+    const namespaces = targets.map(target => target.namespace);
+
+    console.log("Using namespaces:", namespaces);
     console.log("Query:", query);
 
-    // 1. Semantic search
     const cleanQuery = query.toLowerCase().trim();
     const queryEmbedding = await generateEmbedding(cleanQuery);
+    const topKPerNamespace = targets.length > 1 ? 6 : 10;
+    const finalLimit = targets.length > 1 ? Math.min(12, Math.max(8, targets.length * 4)) : 5;
 
-    const namespaceIndex = index.namespace(namespace);
-    
-    const semanticResults = await namespaceIndex.query({
-        vector: queryEmbedding,
-        topK: 10,
-        includeMetadata: true
+    const semanticResponses = await Promise.allSettled(
+        targets.map(async target => {
+            const namespaceIndex = index.namespace(target.namespace);
+            const results = await namespaceIndex.query({
+                vector: queryEmbedding,
+                topK: topKPerNamespace,
+                includeMetadata: true
+            });
+
+            return (results.matches || []).map(match => ({
+                text: match.metadata?.text || match.metadata?.content || "",
+                chunkIndex: match.metadata?.chunkIndex,
+                fileName: match.metadata?.fileName || target.fileName,
+                namespace: target.namespace,
+                documentId: target.documentId,
+                semanticScore: match.score
+            }));
+        })
+    );
+
+    const semanticChunks = semanticResponses.flatMap(result => {
+        if (result.status === "fulfilled") return result.value;
+        console.error("Semantic namespace search failed:", result.reason?.message || result.reason);
+        return [];
     });
-    console.log("Semantic matches:", semanticResults.matches.length);
+    console.log("Semantic matches:", semanticChunks.length);
 
-    const semanticChunks = semanticResults.matches.map(m => ({
-        text: m.metadata.text || m.metadata.content || "",
-        chunkIndex: m.metadata.chunkIndex,
-        fileName: m.metadata.fileName,
-        semanticScore: m.score
-    }));
-
-    // 2. Keyword search & Fallback check
     let keywordChunks = [];
     try {
-        keywordChunks = await keywordSearch(query, namespace);
+        keywordChunks = (await keywordSearch(query, namespaces, finalLimit)).map(chunk => enrichChunk(chunk, targetMeta));
     } catch (e) {
         console.error("Keyword search failed:", e);
     }
 
-    if (semanticResults.matches.length < 3) {
-        const keywordOnly = keywordChunks.slice(0, 5);
+    if (semanticChunks.length < 3) {
+        const keywordOnly = keywordChunks.slice(0, finalLimit);
         while (keywordOnly.length < 3 && keywordChunks.length > keywordOnly.length) {
             keywordOnly.push(keywordChunks[keywordOnly.length]);
         }
@@ -48,70 +106,51 @@ export const retrieveRelevantChunks = async (query, namespace) => {
         return keywordOnly;
     }
 
-    // 3. Normalize scores
     const maxSemantic = Math.max(...semanticChunks.map(c => c.semanticScore || 0), 1);
     const maxKeyword = Math.max(...keywordChunks.map(c => c.keywordScore || 0), 1);
-
-    // 4. Deduplication logic
     const mergedMap = new Map();
 
-    const getChunkKey = (chunk) => {
-        if (chunk.fileName && chunk.chunkIndex !== undefined && chunk.chunkIndex !== null) {
-            return `${chunk.fileName}_${chunk.chunkIndex}`;
-        }
-        return (chunk.text || "").substring(0, 100);
-    };
-
     const addChunk = (chunk, isSemantic) => {
-        const key = getChunkKey(chunk);
+        const enriched = enrichChunk(chunk, targetMeta);
+        const key = getChunkKey(enriched);
+
         if (mergedMap.has(key)) {
             const existing = mergedMap.get(key);
-            if (isSemantic) existing.semanticScore = chunk.semanticScore;
-            else existing.keywordScore = chunk.keywordScore;
-        } else {
-            mergedMap.set(key, {
-                text: chunk.text,
-                chunkIndex: chunk.chunkIndex,
-                fileName: chunk.fileName,
-                semanticScore: isSemantic ? chunk.semanticScore : 0,
-                keywordScore: isSemantic ? 0 : chunk.keywordScore
-            });
+            if (isSemantic) existing.semanticScore = enriched.semanticScore;
+            else existing.keywordScore = enriched.keywordScore;
+            return;
         }
+
+        mergedMap.set(key, {
+            text: enriched.text,
+            chunkIndex: enriched.chunkIndex,
+            fileName: enriched.fileName,
+            namespace: enriched.namespace,
+            documentId: enriched.documentId,
+            semanticScore: isSemantic ? enriched.semanticScore : 0,
+            keywordScore: isSemantic ? 0 : enriched.keywordScore
+        });
     };
 
-    semanticChunks.forEach(c => addChunk(c, true));
-    keywordChunks.forEach(c => addChunk(c, false));
+    semanticChunks.forEach(chunk => addChunk(chunk, true));
+    keywordChunks.forEach(chunk => addChunk(chunk, false));
 
-    const combined = Array.from(mergedMap.values());
-
-    // 5. Score fusion (normalized)
-    const scored = combined.map(chunk => ({
+    const scored = Array.from(mergedMap.values()).map(chunk => ({
         ...chunk,
         finalScore:
             ((chunk.semanticScore || 0) / maxSemantic) * 0.7 +
             ((chunk.keywordScore || 0) / maxKeyword) * 0.3
     }));
 
-    // 6. Sort and return top 5 with a minimum of 3 chunks (prefer keyword for fill)
     const finalChunks = scored
         .sort((a, b) => b.finalScore - a.finalScore)
-        .slice(0, 5);
+        .slice(0, finalLimit);
 
     if (finalChunks.length < 3) {
-        const seen = new Set(
-            finalChunks.map((chunk) =>
-                chunk.fileName && chunk.chunkIndex !== undefined && chunk.chunkIndex !== null
-                    ? `${chunk.fileName}_${chunk.chunkIndex}`
-                    : (chunk.text || "").substring(0, 100)
-            )
-        );
+        const seen = new Set(finalChunks.map(getChunkKey));
 
         for (const keywordChunk of keywordChunks) {
-            const key =
-                keywordChunk.fileName && keywordChunk.chunkIndex !== undefined && keywordChunk.chunkIndex !== null
-                    ? `${keywordChunk.fileName}_${keywordChunk.chunkIndex}`
-                    : (keywordChunk.text || "").substring(0, 100);
-
+            const key = getChunkKey(keywordChunk);
             if (!seen.has(key)) {
                 finalChunks.push({
                     ...keywordChunk,

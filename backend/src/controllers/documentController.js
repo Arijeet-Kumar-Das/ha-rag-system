@@ -1,6 +1,8 @@
 import { getIndex } from "../services/vectorService.js";
 import Document from "../models/Document.js";
 import Chunk from "../models/Chunk.js";
+import Workspace from "../models/Workspace.js";
+import Chat from "../models/Chat.js";
 
 export const getDocuments = async (req, res) => {
     try {
@@ -52,6 +54,8 @@ export const deleteDocument = async (req, res) => {
         // 2. Delete from MongoDB
         await Chunk.deleteMany({ namespace: id });
         await Document.deleteOne({ namespace: id });
+        await Workspace.updateMany({ userId }, { $pull: { documentIds: doc._id } });
+        await Chat.updateMany({ userId }, { $pull: { activeDocumentIds: doc._id.toString() } });
 
         console.log(`[DELETE] MongoDB records for ${id} deleted.`);
 
@@ -62,4 +66,3 @@ export const deleteDocument = async (req, res) => {
         return res.status(500).json({ error: "Failed to delete document" });
     }
 };
-

@@ -1,8 +1,10 @@
 import Chunk from "../models/Chunk.js";
 
-export const keywordSearch = async (query, namespace) => {
+export const keywordSearch = async (query, namespace, limit = 8) => {
     const filter = { $text: { $search: query } };
-    if (namespace) {
+    if (Array.isArray(namespace) && namespace.length > 0) {
+        filter.namespace = { $in: namespace };
+    } else if (namespace) {
         filter.namespace = namespace;
     }
 
@@ -11,12 +13,13 @@ export const keywordSearch = async (query, namespace) => {
         { score: { $meta: "textScore" } }
     )
         .sort({ score: { $meta: "textScore" } })
-        .limit(5);
+        .limit(limit);
 
     return results.map(doc => ({
         text: doc.text,
         chunkIndex: doc.chunkIndex,
         fileName: doc.fileName,
+        namespace: doc.namespace,
         keywordScore: doc._doc.score
     }));
 };

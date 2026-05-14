@@ -91,14 +91,18 @@ const parseSseFrame = (frame) => {
  * Calls onToken for each chunk of text received.
  * Returns the full accumulated answer when done.
  */
-export const askQuestion = async (question, documentId, chatId, onToken, mode = "standard") => {
+export const askQuestion = async (question, target, chatId, onToken, mode = "standard") => {
+  const targetPayload = typeof target === "object" && target !== null
+    ? target
+    : { documentId: target };
+
   const res = await fetch(`${API_BASE}/ask`, {
     method: "POST",
     headers: authHeaders({
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     }),
-    body: JSON.stringify({ question, documentId, chatId, mode }),
+    body: JSON.stringify({ question, ...targetPayload, chatId, mode }),
   });
 
   const newChatId = res.headers.get("X-Chat-Id") || null;
@@ -195,9 +199,10 @@ export const askQuestion = async (question, documentId, chatId, onToken, mode = 
 /**
  * Upload a PDF file to the backend.
  */
-export const uploadFile = async (file) => {
+export const uploadFile = async (file, workspaceId) => {
   const formData = new FormData();
   formData.append("file", file);
+  if (workspaceId) formData.append("workspaceId", workspaceId);
 
   const res = await fetch(`${API_BASE}/upload`, {
     method: "POST",
@@ -228,6 +233,83 @@ export const getDocuments = async () => {
 };
 
 /**
+ * Workspace APIs
+ */
+export const getWorkspaces = async () => {
+  const res = await fetch(`${API_BASE}/workspace`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to fetch workspaces");
+  }
+  return res.json();
+};
+
+export const createWorkspace = async ({ name, documentIds = [] }) => {
+  const res = await fetch(`${API_BASE}/workspace`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, documentIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to create workspace");
+  }
+  return res.json();
+};
+
+export const updateWorkspace = async (workspaceId, data) => {
+  const res = await fetch(`${API_BASE}/workspace/${workspaceId}`, {
+    method: "PATCH",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to update workspace");
+  }
+  return res.json();
+};
+
+export const addWorkspaceDocuments = async (workspaceId, documentIds) => {
+  const res = await fetch(`${API_BASE}/workspace/${workspaceId}/documents`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ documentIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to add documents");
+  }
+  return res.json();
+};
+
+export const removeWorkspaceDocument = async (workspaceId, documentId) => {
+  const res = await fetch(`${API_BASE}/workspace/${workspaceId}/documents/${documentId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to remove document");
+  }
+  return res.json();
+};
+
+export const deleteWorkspace = async (workspaceId) => {
+  const res = await fetch(`${API_BASE}/workspace/${workspaceId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to delete workspace");
+  }
+  return res.json();
+};
+
+/**
  * Chat APIs
  */
 export const getChatsByDocument = async (documentId) => {
@@ -235,6 +317,14 @@ export const getChatsByDocument = async (documentId) => {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch chats");
+  return res.json();
+};
+
+export const getChatsByWorkspace = async (workspaceId) => {
+  const res = await fetch(`${API_BASE}/chat/workspace/${workspaceId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch workspace chats");
   return res.json();
 };
 

@@ -6,6 +6,7 @@ import { getIndex } from "../services/vectorService.js";
 import { randomUUID } from "crypto";
 import Chunk from "../models/Chunk.js";
 import Document from "../models/Document.js";
+import Workspace from "../models/Workspace.js";
 
 export const uploadPDF = async (req, res) => {
     try {
@@ -16,6 +17,7 @@ export const uploadPDF = async (req, res) => {
         // With memoryStorage, the file buffer is available directly
         const pdfBuffer = req.file.buffer;
         const fileName = req.file.originalname;
+        const { workspaceId } = req.body;
 
         console.log(`[UPLOAD] File received: ${fileName} (${pdfBuffer.length} bytes)`);
 
@@ -39,6 +41,7 @@ export const uploadPDF = async (req, res) => {
             } catch (e) {}
             await Chunk.deleteMany({ namespace: existingDoc.namespace });
             await Document.deleteOne({ namespace: existingDoc.namespace });
+            await Workspace.updateMany({ userId }, { $pull: { documentIds: existingDoc._id } });
         }
 
         const userDocsCount = await Document.countDocuments({ userId });
@@ -55,6 +58,7 @@ export const uploadPDF = async (req, res) => {
                 } catch (e) {}
                 await Chunk.deleteMany({ namespace: oldestDoc.namespace });
                 await Document.deleteOne({ namespace: oldestDoc.namespace });
+                await Workspace.updateMany({ userId }, { $pull: { documentIds: oldestDoc._id } });
             }
         }
 
@@ -105,6 +109,7 @@ export const uploadPDF = async (req, res) => {
                             chunkIndex: globalIndex,
                             fileName: fileName,
                             namespace: documentId,
+                            userId,
                         },
                     });
                 } catch (err) {
@@ -143,7 +148,7 @@ export const uploadPDF = async (req, res) => {
         }
 
         // ── 7. Persist metadata to MongoDB ───────────────────────────────
-        await Document.create({
+        const document = await Document.create({
             fileName,
             namespace: documentId,
             userId,
@@ -157,8 +162,19 @@ export const uploadPDF = async (req, res) => {
                 chunkIndex: i,
                 fileName: fileName,
                 namespace: documentId,
+                userId,
             }))
         );
+
+        if (workspaceId) {
+            const workspace = await Workspace.findOne({ _id: workspaceId, userId });
+            if (workspace) {
+                const existingIds = new Set(workspace.documentIds.map(id => id.toString()));
+                existingIds.add(document._id.toString());
+                workspace.documentIds = Array.from(existingIds);
+                await workspace.save();
+            }
+        }
 
         console.log(
             `[UPLOAD] ✅ Complete. Namespace: ${documentId}, vectors: ${vectors.length}`
@@ -167,6 +183,7 @@ export const uploadPDF = async (req, res) => {
         res.json({
             message: "PDF processed and stored successfully",
             documentId,
+            mongoDocumentId: document._id,
             cloudinaryUrl,
             totalChunks: chunks.length,
             storedVectors: vectors.length,

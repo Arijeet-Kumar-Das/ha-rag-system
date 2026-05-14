@@ -83,7 +83,7 @@ export default function ChatMessage({ message }) {
           className={`relative rounded-2xl px-4 py-3 text-[14px] leading-7 whitespace-pre-wrap transition-all duration-200
             ${isUser
               ? "rounded-br-md bg-gradient-to-br from-violet-600/90 to-indigo-600/90 text-white shadow-[0_4px_20px_rgba(139,92,246,0.2)]"
-              : `rounded-bl-md border ${t.border} ${isDark ? 'bg-white/[0.03] text-white/85' : 'bg-white text-slate-700 shadow-sm'}`
+              : `rounded-bl-md border ${t.border} ${isDark ? 'bg-white/[0.03] text-white/85' : 'bg-white text-slate-700 shadow-[0_2px_12px_rgba(0,0,0,0.06)]'}`
             }`}
         >
           {message.content || ""}

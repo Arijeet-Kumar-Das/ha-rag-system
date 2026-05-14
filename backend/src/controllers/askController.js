@@ -5,8 +5,25 @@ import { getCache, setCache } from "../services/cacheService.js";
 import { classifyQuery } from "../services/classificationService.js";
 import { createSseStream } from "../utils/sse.js";
 import Document from "../models/Document.js";
+import Workspace from "../models/Workspace.js";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
+
+const createHttpError = (status, message) => {
+    const error = new Error(message);
+    error.status = status;
+    return error;
+};
+
+const normalizeIds = (ids = []) => {
+    return [...new Set(ids.filter(Boolean).map(id => id.toString()))];
+};
+
+const toDocumentTarget = (doc) => ({
+    documentId: doc._id.toString(),
+    namespace: doc.namespace,
+    fileName: doc.fileName
+});
 
 const persistAssistantMessage = async (chatId, content, sources = []) => {
     await Message.create({
@@ -32,6 +49,84 @@ const streamError = (stream, message) => {
     stream.close();
 };
 
+const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentIds, existingChat }) => {
+    const requestedWorkspaceId = workspaceId || existingChat?.workspaceId || null;
+    const requestedDocumentId = documentId || existingChat?.documentId || null;
+
+    if (requestedWorkspaceId) {
+        const workspace = await Workspace.findOne({ _id: requestedWorkspaceId, userId });
+        if (!workspace) {
+            throw createHttpError(404, "Workspace not found");
+        }
+
+        const workspaceDocumentIds = normalizeIds(workspace.documentIds);
+        const requestedDocumentIds = normalizeIds(
+            documentIds?.length
+                ? documentIds
+                : existingChat?.activeDocumentIds?.length
+                    ? existingChat.activeDocumentIds
+                    : workspaceDocumentIds
+        );
+        const requestedSet = new Set(requestedDocumentIds);
+
+        const workspaceDocs = workspaceDocumentIds.length
+            ? await Document.find({ _id: { $in: workspaceDocumentIds }, userId }).sort({ uploadDate: -1 })
+            : [];
+        let targetDocs = workspaceDocs.filter(doc => requestedSet.has(doc._id.toString()));
+
+        if (targetDocs.length === 0 && workspaceDocs.length > 0) {
+            targetDocs = workspaceDocs;
+        }
+
+        return {
+            workspace,
+            workspaceId: workspace._id.toString(),
+            targetDocumentId: null,
+            targetDocs,
+            cacheScope: `workspace:${workspace._id}:${targetDocs.map(doc => doc._id.toString()).sort().join(",")}`
+        };
+    }
+
+    if (requestedDocumentId) {
+        const doc = await Document.findById(requestedDocumentId);
+        if (!doc) {
+            throw createHttpError(404, "Selected document not found");
+        }
+
+        if (doc.userId !== userId) {
+            throw createHttpError(403, "Not authorized to access this document");
+        }
+
+        return {
+            workspace: null,
+            workspaceId: null,
+            targetDocumentId: doc._id.toString(),
+            targetDocs: [doc],
+            cacheScope: `document:${doc._id}`
+        };
+    }
+
+    const latestDoc = await Document.findOne({ userId }).sort({ uploadDate: -1 });
+    if (!latestDoc) {
+        return {
+            workspace: null,
+            workspaceId: null,
+            targetDocumentId: null,
+            targetDocs: [],
+            cacheScope: "document:none"
+        };
+    }
+
+    console.log(`[ASK] No documentId provided, defaulting to latest: ${latestDoc.namespace}`);
+    return {
+        workspace: null,
+        workspaceId: null,
+        targetDocumentId: latestDoc._id.toString(),
+        targetDocs: [latestDoc],
+        cacheScope: `document:${latestDoc._id}`
+    };
+};
+
 export const askQuestion = async (req, res) => {
     let stream = null;
     const abortController = new AbortController();
@@ -42,7 +137,14 @@ export const askQuestion = async (req, res) => {
         }
 
         const userId = req.user._id.toString();
-        const { question, documentId, chatId, mode = "standard" } = req.body;
+        const {
+            question,
+            documentId,
+            documentIds = [],
+            workspaceId,
+            chatId,
+            mode = "standard"
+        } = req.body;
         console.log("[ASK] Mode:", mode);
 
         if (!question) {
@@ -51,54 +153,52 @@ export const askQuestion = async (req, res) => {
 
         console.log("question:", question);
         console.log("documentId:", documentId);
-
-        let namespace = null;
-        let targetDocumentId = documentId;
-
-        if (documentId) {
-            const doc = await Document.findById(documentId);
-            console.log("Found doc:", doc);
-            if (!doc) {
-                return res.status(404).json({ error: "Selected document not found" });
-            }
-
-            if (doc.userId !== userId) {
-                return res.status(403).json({ error: "Not authorized to access this document" });
-            }
-
-            namespace = doc.namespace;
-            targetDocumentId = doc._id;
-            console.log("Namespace:", namespace);
-        } else {
-            const latestDoc = await Document.findOne({ userId }).sort({ uploadDate: -1 });
-            if (latestDoc) {
-                targetDocumentId = latestDoc._id;
-                namespace = latestDoc.namespace;
-                console.log(`[ASK] No documentId provided, defaulting to latest: ${namespace}`);
-            } else {
-                console.log("[ASK] No documentId provided and no documents found in DB. Retrieval might fail.");
-            }
-        }
-
-        console.log("Resolved namespace:", namespace);
+        console.log("workspaceId:", workspaceId);
 
         let targetChatId = chatId;
         let chatHistory = [];
+        let existingChat = null;
 
         if (targetChatId) {
-            const chat = await Chat.findById(targetChatId);
-            if (!chat) return res.status(404).json({ error: "Chat not found" });
+            existingChat = await Chat.findById(targetChatId);
+            if (!existingChat) return res.status(404).json({ error: "Chat not found" });
 
-            if (chat.userId !== userId) {
+            if (existingChat.userId !== userId) {
                 return res.status(403).json({ error: "Not authorized to access this chat" });
             }
 
             chatHistory = await Message.find({ chatId: targetChatId }).sort({ createdAt: 1 });
             console.log("chatHistory length:", chatHistory.length);
-        } else {
+        }
+
+        const scope = await resolveQuestionScope({
+            userId,
+            workspaceId,
+            documentId,
+            documentIds,
+            existingChat
+        });
+        const retrievalTargets = scope.targetDocs.map(toDocumentTarget);
+        const activeDocumentIds = scope.targetDocs.map(doc => doc._id.toString());
+        console.log("Resolved targets:", retrievalTargets.map(target => target.fileName));
+
+        if (!targetChatId) {
             const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
-            const newChat = await Chat.create({ title: title || "New Chat", documentId: targetDocumentId, userId });
+            const newChat = await Chat.create({
+                title: title || "New Chat",
+                documentId: scope.targetDocumentId,
+                workspaceId: scope.workspaceId,
+                activeDocumentIds,
+                userId
+            });
             targetChatId = newChat._id;
+        } else {
+            await Chat.findByIdAndUpdate(targetChatId, {
+                documentId: scope.targetDocumentId,
+                workspaceId: scope.workspaceId,
+                activeDocumentIds,
+                updatedAt: new Date()
+            });
         }
 
         await Message.create({
@@ -109,13 +209,22 @@ export const askQuestion = async (req, res) => {
 
         res.setHeader("X-Chat-Id", targetChatId.toString());
         stream = createSseStream(req, res);
-        stream.send("meta", { chatId: targetChatId.toString() });
+        stream.send("meta", {
+            chatId: targetChatId.toString(),
+            workspaceId: scope.workspaceId,
+            documentIds: activeDocumentIds
+        });
 
         req.on("close", () => abortController.abort());
 
-        const cached = getCache(question, namespace);
+        if (retrievalTargets.length === 0) {
+            await streamStaticAnswer(stream, targetChatId, "No active documents found in this workspace.", []);
+            return;
+        }
+
+        const cached = getCache(question, scope.cacheScope);
         if (cached) {
-            console.log("CACHE HIT:", question, "for namespace:", namespace);
+            console.log("CACHE HIT:", question, "for scope:", scope.cacheScope);
             await streamStaticAnswer(
                 stream,
                 targetChatId,
@@ -139,7 +248,7 @@ export const askQuestion = async (req, res) => {
 
         stream.send("status", { stage: "retrieving" });
         console.time("Retrieval");
-        const chunks = await retrieveRelevantChunks(question, namespace);
+        const chunks = await retrieveRelevantChunks(question, retrievalTargets);
         console.timeEnd("Retrieval");
         console.log("chunks length:", chunks?.length);
 
@@ -163,7 +272,9 @@ export const askQuestion = async (req, res) => {
         const sources = chunks.map(c => ({
             text: c.text,
             fileName: c.fileName,
-            chunkIndex: c.chunkIndex
+            chunkIndex: c.chunkIndex,
+            documentId: c.documentId,
+            namespace: c.namespace
         }));
 
         let fullAnswer = "";
@@ -212,7 +323,7 @@ export const askQuestion = async (req, res) => {
 
         if (fullAnswer) {
             await persistAssistantMessage(targetChatId, fullAnswer, sources);
-            setCache(question, { answer: fullAnswer, sources, verification }, namespace);
+            setCache(question, { answer: fullAnswer, sources, verification }, scope.cacheScope);
         }
 
         console.log(`Total RAG request time: ${Date.now() - startTime}ms`);
@@ -220,12 +331,12 @@ export const askQuestion = async (req, res) => {
         console.error("ASK ERROR:", error);
 
         if (stream && !stream.isClosed()) {
-            streamError(stream, "Streaming failed");
+            streamError(stream, error.status ? error.message : "Streaming failed");
             return;
         }
 
         if (!res.headersSent) {
-            return res.status(500).json({ error: "Streaming failed" });
+            return res.status(error.status || 500).json({ error: error.status ? error.message : "Streaming failed" });
         }
 
         if (!res.writableEnded) {

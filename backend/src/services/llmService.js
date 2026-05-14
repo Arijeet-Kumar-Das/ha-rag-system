@@ -27,7 +27,8 @@ const buildMessages = (question, chunks, chatHistory = []) => {
         grouped[file].sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
         grouped[file].forEach(chunk => {
             if (chunk.text) {
-                sortedContexts.push(chunk.text);
+                const sourceLabel = `[Source: ${file}, chunk ${chunk.chunkIndex ?? "?"}]`;
+                sortedContexts.push(`${sourceLabel}\n${chunk.text}`);
             }
         });
     }
@@ -79,7 +80,7 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     return [
         {
             role: "system",
-            content: "You are an academic assistant. Use ALL relevant context to answer.\nIf the answer contains multiple points, list ALL of them completely.\nDo NOT omit important parts.\nDo NOT hallucinate beyond context."
+            content: "You are an academic assistant. Use ALL relevant context across the provided documents to answer.\nWhen documents disagree or need comparison, reason across files explicitly.\nCite document names naturally when making document-specific claims.\nIf the answer contains multiple points, list ALL of them completely.\nDo NOT omit important parts.\nDo NOT hallucinate beyond context."
         },
         ...historyMessages,
         {

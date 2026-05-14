@@ -1,6 +1,10 @@
+import mongoose from "mongoose";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
 import Document from "../models/Document.js";
+import Workspace from "../models/Workspace.js";
+
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 export const getChatsByDocument = async (req, res) => {
     try {
@@ -9,7 +13,7 @@ export const getChatsByDocument = async (req, res) => {
         }
 
         const { documentId } = req.params;
-        if (!documentId) return res.status(400).json({ error: "documentId is required" });
+        if (!documentId || !isValidId(documentId)) return res.status(400).json({ error: "Valid documentId is required" });
 
         // Verify the document belongs to the current user
         const doc = await Document.findById(documentId);
@@ -25,6 +29,30 @@ export const getChatsByDocument = async (req, res) => {
     }
 };
 
+export const getChatsByWorkspace = async (req, res) => {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        const { workspaceId } = req.params;
+        if (!workspaceId || !isValidId(workspaceId)) return res.status(400).json({ error: "Valid workspaceId is required" });
+
+        const workspace = await Workspace.findById(workspaceId);
+        if (!workspace || workspace.userId !== req.user._id.toString()) {
+            return res.status(403).json({ error: "Not authorized to access this workspace's chats" });
+        }
+
+        const chats = await Chat.find({ workspaceId, userId: req.user._id.toString() })
+            .sort({ updatedAt: -1 })
+            .limit(50);
+        res.json(chats);
+    } catch (err) {
+        console.error("[GET WORKSPACE CHATS ERROR]", err);
+        res.status(500).json({ error: "Failed to fetch workspace chats" });
+    }
+};
+
 export const getChatMessages = async (req, res) => {
     try {
         if (!req.user) {
@@ -32,7 +60,7 @@ export const getChatMessages = async (req, res) => {
         }
 
         const { chatId } = req.params;
-        if (!chatId) return res.status(400).json({ error: "chatId is required" });
+        if (!chatId || !isValidId(chatId)) return res.status(400).json({ error: "Valid chatId is required" });
 
         // Verify the chat belongs to the current user
         const chat = await Chat.findById(chatId);
@@ -55,7 +83,7 @@ export const deleteChat = async (req, res) => {
         }
 
         const { chatId } = req.params;
-        if (!chatId) return res.status(400).json({ error: "chatId is required" });
+        if (!chatId || !isValidId(chatId)) return res.status(400).json({ error: "Valid chatId is required" });
 
         // Verify the chat belongs to the current user
         const chat = await Chat.findById(chatId);
