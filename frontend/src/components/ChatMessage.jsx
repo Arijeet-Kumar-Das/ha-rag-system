@@ -1,5 +1,6 @@
 import SourceCard from "./SourceCard";
 import { useTheme } from '../context/ThemeContext';
+import ReactMarkdown from 'react-markdown';
 
 function VerificationBadge({ verification }) {
   if (!verification) return null
@@ -80,13 +81,19 @@ export default function ChatMessage({ message }) {
 
         {/* Message bubble */}
         <div
-          className={`relative rounded-2xl px-4 py-3 text-[14px] leading-7 whitespace-pre-wrap transition-all duration-200
+          className={`relative rounded-2xl px-4 py-3 text-[14px] leading-7 transition-all duration-200
             ${isUser
-              ? "rounded-br-md bg-gradient-to-br from-violet-600/90 to-indigo-600/90 text-white shadow-[0_4px_20px_rgba(139,92,246,0.2)]"
+              ? "rounded-br-md bg-gradient-to-br from-violet-600/90 to-indigo-600/90 text-white shadow-[0_4px_20px_rgba(139,92,246,0.2)] whitespace-pre-wrap"
               : `rounded-bl-md border ${t.border} ${isDark ? 'bg-white/[0.03] text-white/85' : 'bg-white text-slate-700 shadow-[0_2px_12px_rgba(0,0,0,0.06)]'}`
             }`}
         >
-          {message.content || ""}
+          {isUser ? (
+            message.content || ""
+          ) : (
+            <div className="prose-chat">
+              <ReactMarkdown>{message.content || ""}</ReactMarkdown>
+            </div>
+          )}
           {message.streaming && (
             <span aria-hidden="true" className="ml-1 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-current opacity-70" />
           )}
