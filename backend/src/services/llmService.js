@@ -8,6 +8,16 @@ const getClient = () => {
     return client;
 };
 
+/**
+ * Build the messages array for the LLM.
+ * 
+ * Optimizations over previous version:
+ * - Reduced MAX_WORDS from 1500 → 1000 (leaner prompts, faster TTFT)
+ * - Reduced MAX_HISTORY_WORDS from 1500 → 800
+ * - Reduced MAX_PER_MESSAGE_WORDS from 500 → 250
+ * - Trimmed system prompt to essentials
+ * - Compact source labels
+ */
 const buildMessages = (question, chunks, chatHistory = []) => {
     if (!chunks || chunks.length === 0) {
         return null;
@@ -27,36 +37,36 @@ const buildMessages = (question, chunks, chatHistory = []) => {
         grouped[file].sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0));
         grouped[file].forEach(chunk => {
             if (chunk.text) {
-                const sourceLabel = `[Source: ${file}, chunk ${chunk.chunkIndex ?? "?"}]`;
+                const sourceLabel = `[${file}:${chunk.chunkIndex ?? "?"}]`;
                 sortedContexts.push(`${sourceLabel}\n${chunk.text}`);
             }
         });
     }
 
-    // 3. Limit total context size to ~1500 words
+    // 3. Limit total context size — reduced from 1500 to 1000 words
     let joinedContext = "";
     let currentWordCount = 0;
-    const MAX_WORDS = 1500;
+    const MAX_WORDS = 1000;
 
     for (const text of sortedContexts) {
         const words = text.split(/\s+/);
         if (currentWordCount + words.length > MAX_WORDS) {
             const remaining = MAX_WORDS - currentWordCount;
             if (remaining > 0) {
-                joinedContext += (joinedContext ? "\n-----\n" : "") + words.slice(0, remaining).join(" ");
+                joinedContext += (joinedContext ? "\n---\n" : "") + words.slice(0, remaining).join(" ");
             }
-            break; // Stop adding more context to prevent overflow
+            break;
         }
-        joinedContext += (joinedContext ? "\n-----\n" : "") + text;
+        joinedContext += (joinedContext ? "\n---\n" : "") + text;
         currentWordCount += words.length;
     }
 
-    // 4. Prepend chatHistory (limit to last 6 messages, trim each to prevent overflow)
-    const MAX_HISTORY_WORDS = 1500;
-    const MAX_PER_MESSAGE_WORDS = 500;
+    // 4. Prepend chatHistory (limit to last 4 messages, trim each)
+    const MAX_HISTORY_WORDS = 800;
+    const MAX_PER_MESSAGE_WORDS = 250;
     let historyWordCount = 0;
 
-    const trimmedHistory = chatHistory.slice(-6);
+    const trimmedHistory = chatHistory.slice(-4);
     const historyMessages = [];
 
     for (const msg of trimmedHistory) {
@@ -65,7 +75,7 @@ const buildMessages = (question, chunks, chatHistory = []) => {
         const trimmedContent = trimmedWords.join(" ") + (words.length > MAX_PER_MESSAGE_WORDS ? "..." : "");
 
         if (historyWordCount + trimmedWords.length > MAX_HISTORY_WORDS) {
-            break; // Stop adding more history to prevent context overflow
+            break;
         }
 
         historyMessages.push({
@@ -76,11 +86,12 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     }
 
     console.log(`[LLM] Chat history: ${historyMessages.length} messages, ~${historyWordCount} words`);
+    console.log(`[LLM] Context: ~${currentWordCount} words from ${chunks.length} chunks`);
 
     return [
         {
             role: "system",
-            content: "You are an academic assistant. Use ALL relevant context across the provided documents to answer.\nWhen documents disagree or need comparison, reason across files explicitly.\nCite document names naturally when making document-specific claims.\nIf the answer contains multiple points, list ALL of them completely.\nDo NOT omit important parts.\nDo NOT hallucinate beyond context."
+            content: "You are an academic assistant. Answer using the provided context.\nCite document names when making document-specific claims.\nIf context doesn't contain the answer, say so clearly.\nDo NOT hallucinate beyond context."
         },
         ...historyMessages,
         {
@@ -98,7 +109,6 @@ export const generateAnswer = async (question, chunks) => {
         return "Not enough information found in documents.";
     }
 
-    // The user content message is always the last element
     const userMessage = messages[messages.length - 1];
     const contextLength = userMessage.content.split(/\s+/).length;
     console.log(`[LLM] Final selected chunks for context: ${chunks.length}`);
@@ -127,14 +137,17 @@ export const streamAnswer = async (question, chunks, chatHistory = [], onToken, 
         return "Not enough information found in documents.";
     }
 
-    // The user content message is always the last element
     const userMessage = messages[messages.length - 1];
     const contextLength = userMessage.content.split(/\s+/).length;
     console.log(`[LLM Stream] Final selected chunks for context: ${chunks.length}`);
     console.log(`[LLM Stream] Context length (words): ${contextLength}`);
 
     let fullAnswer = "";
-    console.time("LLM Stream Time");
+    let firstTokenReceived = false;
+
+    const requestStart = Date.now();
+    console.log(`[LLM Stream] OpenAI request start: ${new Date(requestStart).toISOString()}`);
+
     try {
         const requestOptions = options.signal ? { signal: options.signal } : undefined;
         const stream = await getClient().chat.completions.create({
@@ -149,12 +162,25 @@ export const streamAnswer = async (question, chunks, chatHistory = [], onToken, 
 
             const token = chunk.choices?.[0]?.delta?.content;
             if (token) {
+                if (!firstTokenReceived) {
+                    firstTokenReceived = true;
+                    const ttft = Date.now() - requestStart;
+                    console.log(`[LLM Stream] ⚡ TTFT (Time To First Token): ${ttft}ms`);
+                    // Report TTFT through timings if provided
+                    if (options.timings) {
+                        options.timings.ttftMs = ttft;
+                    }
+                }
                 onToken(token);
                 fullAnswer += token;
             }
         }
     } finally {
-        console.timeEnd("LLM Stream Time");
+        const totalStreamTime = Date.now() - requestStart;
+        console.log(`[LLM Stream] Total stream time: ${totalStreamTime}ms`);
+        if (options.timings) {
+            options.timings.llmTotalMs = totalStreamTime;
+        }
     }
 
     return fullAnswer.trim();

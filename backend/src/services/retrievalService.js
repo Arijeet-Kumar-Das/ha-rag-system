@@ -2,6 +2,13 @@ import { generateEmbedding } from "./embeddingService.js";
 import { getIndex } from "./vectorService.js";
 import { keywordSearch } from "./keywordService.js";
 
+// ── Similarity thresholds ────────────────────────────────────────────────
+const SIMILARITY_THRESHOLD = 0.25;       // Minimum cosine similarity to keep a chunk
+const DEDUP_TEXT_SIMILARITY = 0.85;      // Text overlap ratio above which chunks are deduped
+const LOW_CONFIDENCE_THRESHOLD = 0.30;   // If best score < this, return empty (no relevant docs)
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+
 const normalizeTargets = (targetInput) => {
     const input = Array.isArray(targetInput) ? targetInput : [targetInput];
 
@@ -45,7 +52,68 @@ const enrichChunk = (chunk, targetMeta) => {
     };
 };
 
-export const retrieveRelevantChunks = async (query, targetInput) => {
+/**
+ * Calculate text overlap ratio between two strings.
+ * Uses word-set Jaccard similarity for speed.
+ */
+const textOverlapRatio = (textA, textB) => {
+    if (!textA || !textB) return 0;
+
+    const wordsA = new Set(textA.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+    const wordsB = new Set(textB.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+
+    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+    let intersection = 0;
+    for (const word of wordsA) {
+        if (wordsB.has(word)) intersection++;
+    }
+
+    return intersection / Math.min(wordsA.size, wordsB.size);
+};
+
+/**
+ * Remove near-duplicate chunks based on text overlap.
+ * Keeps the chunk with the higher finalScore.
+ */
+const deduplicateChunks = (chunks) => {
+    const result = [];
+
+    for (const chunk of chunks) {
+        let isDuplicate = false;
+
+        for (const kept of result) {
+            if (textOverlapRatio(chunk.text, kept.text) >= DEDUP_TEXT_SIMILARITY) {
+                isDuplicate = true;
+                break;
+            }
+        }
+
+        if (!isDuplicate) {
+            result.push(chunk);
+        }
+    }
+
+    return result;
+};
+
+/**
+ * Core retrieval with adaptive depth, parallel search, similarity filtering, and deduplication.
+ *
+ * @param {string}  query         - The user's question
+ * @param {Array}   targetInput   - Document targets (namespace/documentId/fileName)
+ * @param {Object}  options
+ * @param {number}  options.topK  - Adaptive topK from query classification
+ * @param {string}  options.queryType - "factual" | "conceptual" | "analytical" | "unsupported"
+ * @param {Object}  options.timings - Object to collect timing data
+ */
+export const retrieveRelevantChunks = async (query, targetInput, options = {}) => {
+    const {
+        topK = 5,
+        queryType = "conceptual",
+        timings = {}
+    } = options;
+
     const targets = normalizeTargets(targetInput);
     if (targets.length === 0) {
         return [];
@@ -55,14 +123,45 @@ export const retrieveRelevantChunks = async (query, targetInput) => {
     const targetMeta = getTargetMeta(targets);
     const namespaces = targets.map(target => target.namespace);
 
-    console.log("Using namespaces:", namespaces);
-    console.log("Query:", query);
+    console.log("[RETRIEVAL] Namespaces:", namespaces);
+    console.log("[RETRIEVAL] Query:", query);
+    console.log(`[RETRIEVAL] Adaptive topK: ${topK}, queryType: ${queryType}`);
 
     const cleanQuery = query.toLowerCase().trim();
-    const queryEmbedding = await generateEmbedding(cleanQuery);
-    const topKPerNamespace = targets.length > 1 ? 6 : 10;
-    const finalLimit = targets.length > 1 ? Math.min(12, Math.max(8, targets.length * 4)) : 5;
 
+    // ── Adaptive per-namespace topK ──────────────────────────────────────
+    // For multi-document, distribute topK across namespaces
+    const topKPerNamespace = targets.length > 1
+        ? Math.max(3, Math.ceil(topK / targets.length) + 2)
+        : topK + 2; // Fetch slightly more than needed for filtering headroom
+
+    // Final limit after merging, filtering, and dedup
+    const finalLimit = topK;
+
+    // ── Run embedding + both searches in parallel ────────────────────────
+    const embeddingStart = Date.now();
+
+    const [queryEmbedding, keywordResults] = await Promise.all([
+        generateEmbedding(cleanQuery),
+        (async () => {
+            const kwStart = Date.now();
+            try {
+                const results = (await keywordSearch(query, namespaces, finalLimit + 4))
+                    .map(chunk => enrichChunk(chunk, targetMeta));
+                timings.keywordSearchMs = Date.now() - kwStart;
+                return results;
+            } catch (e) {
+                console.error("[RETRIEVAL] Keyword search failed:", e.message);
+                timings.keywordSearchMs = Date.now() - kwStart;
+                return [];
+            }
+        })()
+    ]);
+
+    timings.embeddingMs = Date.now() - embeddingStart;
+
+    // ── Vector search (needs embedding, so runs after embedding completes) ──
+    const vectorStart = Date.now();
     const semanticResponses = await Promise.allSettled(
         targets.map(async target => {
             const namespaceIndex = index.namespace(target.namespace);
@@ -82,32 +181,44 @@ export const retrieveRelevantChunks = async (query, targetInput) => {
             }));
         })
     );
+    timings.vectorSearchMs = Date.now() - vectorStart;
 
     const semanticChunks = semanticResponses.flatMap(result => {
         if (result.status === "fulfilled") return result.value;
-        console.error("Semantic namespace search failed:", result.reason?.message || result.reason);
+        console.error("[RETRIEVAL] Semantic namespace search failed:", result.reason?.message || result.reason);
         return [];
     });
-    console.log("Semantic matches:", semanticChunks.length);
 
-    let keywordChunks = [];
-    try {
-        keywordChunks = (await keywordSearch(query, namespaces, finalLimit)).map(chunk => enrichChunk(chunk, targetMeta));
-    } catch (e) {
-        console.error("Keyword search failed:", e);
+    console.log(`[RETRIEVAL] Raw semantic matches: ${semanticChunks.length}`);
+    console.log(`[RETRIEVAL] Raw keyword matches: ${keywordResults.length}`);
+
+    // ── Similarity threshold filtering ───────────────────────────────────
+    const filteredSemantic = semanticChunks.filter(c => (c.semanticScore || 0) >= SIMILARITY_THRESHOLD);
+    console.log(`[RETRIEVAL] After similarity threshold (>=${SIMILARITY_THRESHOLD}): ${filteredSemantic.length}`);
+
+    // ── Low-confidence bail-out ──────────────────────────────────────────
+    // If the BEST semantic score is below threshold, the documents likely don't contain the answer
+    const bestScore = filteredSemantic.length > 0
+        ? Math.max(...filteredSemantic.map(c => c.semanticScore || 0))
+        : 0;
+
+    if (bestScore < LOW_CONFIDENCE_THRESHOLD && keywordResults.length === 0) {
+        console.log(`[RETRIEVAL] Low confidence bail-out (best score: ${bestScore.toFixed(3)})`);
+        return [];
     }
 
-    if (semanticChunks.length < 3) {
-        const keywordOnly = keywordChunks.slice(0, finalLimit);
-        while (keywordOnly.length < 3 && keywordChunks.length > keywordOnly.length) {
-            keywordOnly.push(keywordChunks[keywordOnly.length]);
-        }
-        console.log("Final chunks:", keywordOnly.length);
-        return keywordOnly;
+    // ── Fallback: if no semantic results pass threshold, try keyword-only ──
+    if (filteredSemantic.length === 0) {
+        console.log("[RETRIEVAL] No semantic results above threshold, using keyword-only");
+        const deduped = deduplicateChunks(keywordResults.slice(0, finalLimit));
+        console.log(`[RETRIEVAL] Final chunks (keyword-only): ${deduped.length}`);
+        return deduped;
     }
 
-    const maxSemantic = Math.max(...semanticChunks.map(c => c.semanticScore || 0), 1);
-    const maxKeyword = Math.max(...keywordChunks.map(c => c.keywordScore || 0), 1);
+    // ── Merge semantic + keyword results ─────────────────────────────────
+    const mergeStart = Date.now();
+    const maxSemantic = Math.max(...filteredSemantic.map(c => c.semanticScore || 0), 1);
+    const maxKeyword = Math.max(...keywordResults.map(c => c.keywordScore || 0), 1);
     const mergedMap = new Map();
 
     const addChunk = (chunk, isSemantic) => {
@@ -116,8 +227,8 @@ export const retrieveRelevantChunks = async (query, targetInput) => {
 
         if (mergedMap.has(key)) {
             const existing = mergedMap.get(key);
-            if (isSemantic) existing.semanticScore = enriched.semanticScore;
-            else existing.keywordScore = enriched.keywordScore;
+            if (isSemantic) existing.semanticScore = Math.max(existing.semanticScore, enriched.semanticScore || 0);
+            else existing.keywordScore = Math.max(existing.keywordScore, enriched.keywordScore || 0);
             return;
         }
 
@@ -132,9 +243,10 @@ export const retrieveRelevantChunks = async (query, targetInput) => {
         });
     };
 
-    semanticChunks.forEach(chunk => addChunk(chunk, true));
-    keywordChunks.forEach(chunk => addChunk(chunk, false));
+    filteredSemantic.forEach(chunk => addChunk(chunk, true));
+    keywordResults.forEach(chunk => addChunk(chunk, false));
 
+    // ── Score and rank ───────────────────────────────────────────────────
     const scored = Array.from(mergedMap.values()).map(chunk => ({
         ...chunk,
         finalScore:
@@ -142,29 +254,18 @@ export const retrieveRelevantChunks = async (query, targetInput) => {
             ((chunk.keywordScore || 0) / maxKeyword) * 0.3
     }));
 
-    const finalChunks = scored
-        .sort((a, b) => b.finalScore - a.finalScore)
-        .slice(0, finalLimit);
+    const sorted = scored.sort((a, b) => b.finalScore - a.finalScore);
 
-    if (finalChunks.length < 3) {
-        const seen = new Set(finalChunks.map(getChunkKey));
+    // ── Deduplicate near-identical content ────────────────────────────────
+    const deduped = deduplicateChunks(sorted);
 
-        for (const keywordChunk of keywordChunks) {
-            const key = getChunkKey(keywordChunk);
-            if (!seen.has(key)) {
-                finalChunks.push({
-                    ...keywordChunk,
-                    semanticScore: keywordChunk.semanticScore || 0,
-                    keywordScore: keywordChunk.keywordScore || 0,
-                    finalScore: keywordChunk.keywordScore || 0
-                });
-                seen.add(key);
-            }
+    // ── Apply final limit ────────────────────────────────────────────────
+    const finalChunks = deduped.slice(0, finalLimit);
 
-            if (finalChunks.length >= 3) break;
-        }
-    }
+    timings.mergeMs = Date.now() - mergeStart;
 
-    console.log("Final chunks:", finalChunks.length);
+    console.log(`[RETRIEVAL] After dedup: ${deduped.length}, final: ${finalChunks.length}`);
+    console.log(`[RETRIEVAL] Timings — embedding: ${timings.embeddingMs}ms, vector: ${timings.vectorSearchMs}ms, keyword: ${timings.keywordSearchMs}ms, merge: ${timings.mergeMs}ms`);
+
     return finalChunks;
 };

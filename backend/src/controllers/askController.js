@@ -127,9 +127,16 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
     };
 };
 
+/**
+ * Fallback message used when retrieval returns no relevant chunks
+ * or the query is unsupported.
+ */
+const NO_RELEVANT_INFO = "No relevant information was found in the uploaded documents. Please try rephrasing your question or upload documents that cover this topic.";
+
 export const askQuestion = async (req, res) => {
     let stream = null;
     const abortController = new AbortController();
+    const timings = {};
 
     try {
         if (!req.user) {
@@ -151,9 +158,12 @@ export const askQuestion = async (req, res) => {
             return res.status(400).json({ error: "Question is required" });
         }
 
-        console.log("question:", question);
-        console.log("documentId:", documentId);
-        console.log("workspaceId:", workspaceId);
+        const requestStart = Date.now();
+        console.log("\n════════════════════════════════════════════════════════════════");
+        console.log(`[ASK] New request at ${new Date(requestStart).toISOString()}`);
+        console.log("[ASK] Question:", question);
+        console.log("[ASK] DocumentId:", documentId);
+        console.log("[ASK] WorkspaceId:", workspaceId);
 
         let targetChatId = chatId;
         let chatHistory = [];
@@ -168,9 +178,46 @@ export const askQuestion = async (req, res) => {
             }
 
             chatHistory = await Message.find({ chatId: targetChatId }).sort({ createdAt: 1 });
-            console.log("chatHistory length:", chatHistory.length);
+            console.log("[ASK] Chat history length:", chatHistory.length);
         }
 
+        // ── 1. Classify query (local heuristics — <1ms) ─────────────────
+        const classifyStart = Date.now();
+        const classification = classifyQuery(question);
+        timings.classifyMs = Date.now() - classifyStart;
+        console.log(`[ASK] Classification: ${JSON.stringify(classification)} (${timings.classifyMs}ms)`);
+
+        // Handle DB queries
+        if (classification.type === "db") {
+            // Setup stream for DB response
+            const scope = await resolveQuestionScope({ userId, workspaceId, documentId, documentIds, existingChat });
+            const activeDocumentIds = scope.targetDocs.map(doc => doc._id.toString());
+
+            if (!targetChatId) {
+                const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
+                const newChat = await Chat.create({
+                    title: title || "New Chat",
+                    documentId: scope.targetDocumentId,
+                    workspaceId: scope.workspaceId,
+                    activeDocumentIds,
+                    userId
+                });
+                targetChatId = newChat._id;
+            }
+
+            await Message.create({ chatId: targetChatId, role: "user", content: question });
+
+            res.setHeader("X-Chat-Id", targetChatId.toString());
+            stream = createSseStream(req, res);
+            stream.send("meta", { chatId: targetChatId.toString(), workspaceId: scope.workspaceId, documentIds: activeDocumentIds });
+
+            await streamStaticAnswer(stream, targetChatId, "This will be fetched from database", []);
+            logTimings(timings, requestStart);
+            return;
+        }
+
+        // ── 2. Resolve document scope ────────────────────────────────────
+        const scopeStart = Date.now();
         const scope = await resolveQuestionScope({
             userId,
             workspaceId,
@@ -178,10 +225,13 @@ export const askQuestion = async (req, res) => {
             documentIds,
             existingChat
         });
+        timings.scopeResolveMs = Date.now() - scopeStart;
+
         const retrievalTargets = scope.targetDocs.map(toDocumentTarget);
         const activeDocumentIds = scope.targetDocs.map(doc => doc._id.toString());
-        console.log("Resolved targets:", retrievalTargets.map(target => target.fileName));
+        console.log("[ASK] Resolved targets:", retrievalTargets.map(target => target.fileName));
 
+        // ── 3. Create/update chat ────────────────────────────────────────
         if (!targetChatId) {
             const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
             const newChat = await Chat.create({
@@ -207,6 +257,7 @@ export const askQuestion = async (req, res) => {
             content: question
         });
 
+        // ── 4. Setup SSE stream ──────────────────────────────────────────
         res.setHeader("X-Chat-Id", targetChatId.toString());
         stream = createSseStream(req, res);
         stream.send("meta", {
@@ -219,12 +270,14 @@ export const askQuestion = async (req, res) => {
 
         if (retrievalTargets.length === 0) {
             await streamStaticAnswer(stream, targetChatId, "No active documents found in this workspace.", []);
+            logTimings(timings, requestStart);
             return;
         }
 
+        // ── 5. Check cache ───────────────────────────────────────────────
         const cached = getCache(question, scope.cacheScope);
         if (cached) {
-            console.log("CACHE HIT:", question, "for scope:", scope.cacheScope);
+            console.log("[ASK] CACHE HIT:", question);
             await streamStaticAnswer(
                 stream,
                 targetChatId,
@@ -232,43 +285,44 @@ export const askQuestion = async (req, res) => {
                 cached.sources || [],
                 cached.verification || null
             );
+            logTimings(timings, requestStart);
             return;
         }
 
-        stream.send("status", { stage: "classifying" });
-        const queryType = await classifyQuery(question);
-        console.log("QUERY TYPE:", queryType);
-
-        if (queryType === "DB") {
-            await streamStaticAnswer(stream, targetChatId, "This will be fetched from database", []);
-            return;
-        }
-
-        const startTime = Date.now();
-
+        // ── 6. Retrieve relevant chunks (adaptive topK, parallel search) ──
         stream.send("status", { stage: "retrieving" });
-        console.time("Retrieval");
-        const chunks = await retrieveRelevantChunks(question, retrievalTargets);
-        console.timeEnd("Retrieval");
-        console.log("chunks length:", chunks?.length);
+        const retrievalStart = Date.now();
 
+        const chunks = await retrieveRelevantChunks(question, retrievalTargets, {
+            topK: classification.topK,
+            queryType: classification.type,
+            timings
+        });
+
+        timings.totalRetrievalMs = Date.now() - retrievalStart;
+        console.log(`[ASK] Retrieval complete: ${chunks?.length || 0} chunks in ${timings.totalRetrievalMs}ms`);
+
+        // ── 7. Handle no-results / unsupported queries ───────────────────
         if (!chunks || chunks.length === 0) {
-            await streamStaticAnswer(stream, targetChatId, "No relevant information found", []);
+            await streamStaticAnswer(stream, targetChatId, NO_RELEVANT_INFO, []);
+            logTimings(timings, requestStart);
             return;
         }
 
+        // ── 8. Build context ─────────────────────────────────────────────
         const context = chunks
             .map(c => c.text)
             .filter(Boolean)
             .join("\n---\n");
-        console.log("Context length:", context.length);
-        console.log("Chunks used:", chunks.length);
+        console.log("[ASK] Context length (chars):", context.length);
 
         if (!context || context.trim().length === 0) {
-            await streamStaticAnswer(stream, targetChatId, "No usable context found.", []);
+            await streamStaticAnswer(stream, targetChatId, NO_RELEVANT_INFO, []);
+            logTimings(timings, requestStart);
             return;
         }
 
+        // ── 9. Build sources (only include chunks above quality bar) ─────
         const sources = chunks.map(c => ({
             text: c.text,
             fileName: c.fileName,
@@ -277,22 +331,26 @@ export const askQuestion = async (req, res) => {
             namespace: c.namespace
         }));
 
+        // ── 10. Stream LLM response ─────────────────────────────────────
         let fullAnswer = "";
         let verification = null;
 
         try {
-            console.log("Streaming started");
+            console.log("[ASK] Streaming started");
+            stream.send("status", { stage: "generating" });
+
             fullAnswer = await streamAnswer(
                 question,
                 chunks,
                 chatHistory,
                 (token) => stream.send("token", { text: token }),
-                { signal: abortController.signal }
+                { signal: abortController.signal, timings }
             );
-            console.log("Streaming finished");
+            console.log("[ASK] Streaming finished");
         } catch (err) {
             if (abortController.signal.aborted || stream.isClosed()) {
                 console.log("[ASK] Client disconnected during streaming");
+                logTimings(timings, requestStart);
                 return;
             }
 
@@ -301,6 +359,7 @@ export const askQuestion = async (req, res) => {
 
         if (abortController.signal.aborted || stream.isClosed()) {
             console.log("[ASK] Client disconnected before stream completion");
+            logTimings(timings, requestStart);
             return;
         }
 
@@ -309,14 +368,16 @@ export const askQuestion = async (req, res) => {
             stream.send("token", { text: fullAnswer });
         }
 
+        // ── 11. Verification (optional) ──────────────────────────────────
         if (mode === "verified" && fullAnswer) {
             stream.send("status", { stage: "verifying" });
-            console.time("Verification");
+            const verifyStart = Date.now();
             verification = await verifyAnswer(question, fullAnswer, chunks);
-            console.timeEnd("Verification");
-            console.log("Verification:", verification.confidence);
+            timings.verificationMs = Date.now() - verifyStart;
+            console.log(`[ASK] Verification: ${verification.confidence} (${timings.verificationMs}ms)`);
         }
 
+        // ── 12. Send sources and finalize ────────────────────────────────
         stream.send("sources", { sources, verification });
         stream.send("done", { answer: fullAnswer });
         stream.close();
@@ -326,7 +387,7 @@ export const askQuestion = async (req, res) => {
             setCache(question, { answer: fullAnswer, sources, verification }, scope.cacheScope);
         }
 
-        console.log(`Total RAG request time: ${Date.now() - startTime}ms`);
+        logTimings(timings, requestStart);
     } catch (error) {
         console.error("ASK ERROR:", error);
 
@@ -344,3 +405,24 @@ export const askQuestion = async (req, res) => {
         }
     }
 };
+
+/**
+ * Log comprehensive timing breakdown for performance benchmarking.
+ */
+function logTimings(timings, requestStart) {
+    const totalMs = Date.now() - requestStart;
+    console.log("\n┌── PERFORMANCE METRICS ─────────────────────────────────────");
+    console.log(`│ Classification:       ${timings.classifyMs ?? "-"}ms`);
+    console.log(`│ Scope resolution:     ${timings.scopeResolveMs ?? "-"}ms`);
+    console.log(`│ Embedding generation: ${timings.embeddingMs ?? "-"}ms`);
+    console.log(`│ Vector search:        ${timings.vectorSearchMs ?? "-"}ms`);
+    console.log(`│ Keyword search:       ${timings.keywordSearchMs ?? "-"}ms`);
+    console.log(`│ Merge + dedup:        ${timings.mergeMs ?? "-"}ms`);
+    console.log(`│ Total retrieval:      ${timings.totalRetrievalMs ?? "-"}ms`);
+    console.log(`│ TTFT (first token):   ${timings.ttftMs ?? "-"}ms`);
+    console.log(`│ LLM total stream:     ${timings.llmTotalMs ?? "-"}ms`);
+    console.log(`│ Verification:         ${timings.verificationMs ?? "-"}ms`);
+    console.log(`│ ──────────────────────────────────────────────────────────`);
+    console.log(`│ TOTAL REQUEST TIME:   ${totalMs}ms`);
+    console.log(`└───────────────────────────────────────────────────────────\n`);
+}

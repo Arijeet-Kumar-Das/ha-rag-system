@@ -1,4 +1,4 @@
-export const chunkText = (text, targetWordCount = 500, overlapWordCount = 100) => {
+export const chunkText = (text, targetWordCount = 300, overlapWordCount = 50) => {
     if (!text || typeof text !== "string") return [];
 
     // 1. Normalize whitespace and split by paragraphs to preserve structure.
