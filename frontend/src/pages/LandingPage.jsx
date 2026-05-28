@@ -185,8 +185,9 @@ function PipelineVisual({ isDark }) {
       initial={{ opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      style={{ width: "100%", maxWidth: 340 }}
+      style={{ width: "100%" }}
     >
+      {/* Section label */}
       <div
         style={{
           fontSize: 11,
@@ -194,12 +195,13 @@ function PipelineVisual({ isDark }) {
           color: textSecondary,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
-          marginBottom: 20,
+          marginBottom: 16,
         }}
       >
         How it works
       </div>
 
+      {/* Pipeline steps */}
       {steps.map((step, i) => (
         <div key={i}>
           <motion.div
@@ -261,7 +263,7 @@ function PipelineVisual({ isDark }) {
               }}
             >
               <div
-                style={{ width: 1, height: 20, background: connectorColor }}
+                style={{ width: 1, height: 18, background: connectorColor }}
               />
               <div
                 style={{
@@ -272,7 +274,7 @@ function PipelineVisual({ isDark }) {
                   marginLeft: -2,
                 }}
               />
-              <div style={{ height: 4 }} />
+              <div style={{ height: 3 }} />
             </motion.div>
           )}
         </div>
@@ -284,7 +286,7 @@ function PipelineVisual({ isDark }) {
         animate={{ opacity: 1 }}
         transition={{ delay: 0.9 }}
         style={{
-          marginTop: 20,
+          marginTop: 16,
           padding: "10px 14px",
           borderRadius: 8,
           background: isDark
@@ -316,6 +318,61 @@ function PipelineVisual({ isDark }) {
         >
           Every answer is grounded — no hallucinations
         </span>
+      </motion.div>
+
+      {/* ── Stats row below pipeline ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.0, duration: 0.4 }}
+        style={{
+          marginTop: 24,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 1,
+          borderRadius: 10,
+          overflow: "hidden",
+          border: `1px solid ${border}`,
+        }}
+      >
+        {[
+          { value: "RAG", label: "Architecture" },
+          { value: "GPT-4", label: "Powered by" },
+          { value: "100%", label: "Grounded" },
+        ].map((stat, i) => (
+          <div
+            key={i}
+            style={{
+              background: surface,
+              padding: "14px 12px",
+              textAlign: "center",
+              borderRight: i < 2 ? `1px solid ${border}` : "none",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: accent,
+                letterSpacing: "-0.02em",
+                fontFamily: "var(--font-serif)",
+                marginBottom: 3,
+              }}
+            >
+              {stat.value}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: textSecondary,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              {stat.label}
+            </div>
+          </div>
+        ))}
       </motion.div>
     </motion.div>
   );
@@ -468,11 +525,11 @@ export default function LandingPage() {
           maxWidth: 1160,
           margin: "0 auto",
           width: "100%",
-          padding: "80px 48px 80px",
+          padding: "56px 48px 56px",
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
           gap: 64,
-          alignItems: "center",
+          alignItems: "start" /* ← top-align so both sides start at same y */,
         }}
       >
         {/* Left */}
@@ -488,7 +545,7 @@ export default function LandingPage() {
               color: "var(--accent)",
               textTransform: "uppercase",
               letterSpacing: "0.08em",
-              marginBottom: 24,
+              marginBottom: 20,
             }}
           >
             Academic OS 2.0
@@ -505,7 +562,7 @@ export default function LandingPage() {
               letterSpacing: "-0.04em",
               color: "var(--text-primary)",
               lineHeight: 1.06,
-              marginBottom: 24,
+              marginBottom: 20,
             }}
           >
             Research intelligence,{" "}
@@ -535,7 +592,7 @@ export default function LandingPage() {
               fontSize: 16,
               color: "var(--text-secondary)",
               lineHeight: 1.75,
-              marginBottom: 36,
+              marginBottom: 32,
               maxWidth: 440,
             }}
           >
@@ -553,7 +610,7 @@ export default function LandingPage() {
               display: "flex",
               alignItems: "center",
               gap: 12,
-              marginBottom: 52,
+              marginBottom: 44,
             }}
           >
             <Link to={user ? "/dashboard" : "/register"}>
@@ -570,7 +627,7 @@ export default function LandingPage() {
             )}
           </motion.div>
 
-          {/* Divider before features */}
+          {/* Divider + features */}
           <motion.div
             initial="hidden"
             animate="visible"
@@ -581,12 +638,11 @@ export default function LandingPage() {
               style={{
                 height: 1,
                 background: "var(--border-color)",
-                marginBottom: 32,
+                marginBottom: 28,
                 maxWidth: 440,
               }}
             />
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
               {features.map((feat, i) => (
                 <div
                   key={i}
@@ -635,15 +691,12 @@ export default function LandingPage() {
           </motion.div>
         </div>
 
-        {/* Right: pipeline */}
+        {/* Right: pipeline — top-aligned, padded from divider */}
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
             borderLeft: "1px solid var(--border-color)",
             paddingLeft: 56,
-            alignSelf: "stretch",
+            paddingTop: 4 /* optical alignment with eyebrow on the left */,
           }}
         >
           <PipelineVisual isDark={isDark} />
@@ -655,7 +708,7 @@ export default function LandingPage() {
         style={{
           position: "relative",
           zIndex: 1,
-          padding: "24px 48px",
+          padding: "20px 48px",
           borderTop: "1px solid var(--border-color)",
           display: "flex",
           alignItems: "center",
@@ -666,7 +719,7 @@ export default function LandingPage() {
           <img
             src={logo}
             alt="HA-RAG"
-            style={{ height: 20, width: "auto", opacity: 0.5 }}
+            style={{ height: 20, width: "auto", opacity: 0.45 }}
           />
           <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
             © {new Date().getFullYear()} HA-RAG System
