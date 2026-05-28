@@ -23,6 +23,7 @@ const createTokenBatcher = (onToken) => {
   let pendingText = "";
   let latestSources = [];
   let cancelScheduled = null;
+  let isFirstBatch = true;
 
   const flush = () => {
     cancelScheduled = null;
@@ -39,6 +40,17 @@ const createTokenBatcher = (onToken) => {
 
       pendingText += text;
       latestSources = sources || latestSources;
+
+      // Flush the first batch immediately for instant TTFT
+      if (isFirstBatch) {
+        isFirstBatch = false;
+        if (cancelScheduled) {
+          cancelScheduled();
+          cancelScheduled = null;
+        }
+        flush();
+        return;
+      }
 
       if (!cancelScheduled) {
         cancelScheduled = scheduleTokenFlush(flush);

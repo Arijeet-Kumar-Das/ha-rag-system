@@ -6,6 +6,7 @@ import { keywordSearch } from "./keywordService.js";
 const SIMILARITY_THRESHOLD = 0.25;       // Minimum cosine similarity to keep a chunk
 const DEDUP_TEXT_SIMILARITY = 0.85;      // Text overlap ratio above which chunks are deduped
 const LOW_CONFIDENCE_THRESHOLD = 0.30;   // If best score < this, return empty (no relevant docs)
+const KEYWORD_TIMEOUT_MS = 400;          // Max time to wait for keyword search
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -98,6 +99,19 @@ const deduplicateChunks = (chunks) => {
 };
 
 /**
+ * Race a promise against a timeout. Returns the result or a fallback.
+ */
+const withTimeout = (promise, ms, fallback) => {
+    let timer;
+    return Promise.race([
+        promise,
+        new Promise(resolve => {
+            timer = setTimeout(() => resolve(fallback), ms);
+        })
+    ]).finally(() => clearTimeout(timer));
+};
+
+/**
  * Core retrieval with adaptive depth, parallel search, similarity filtering, and deduplication.
  *
  * @param {string}  query         - The user's question
@@ -130,15 +144,13 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
     const cleanQuery = query.toLowerCase().trim();
 
     // ── Adaptive per-namespace topK ──────────────────────────────────────
-    // For multi-document, distribute topK across namespaces
     const topKPerNamespace = targets.length > 1
         ? Math.max(3, Math.ceil(topK / targets.length) + 2)
-        : topK + 2; // Fetch slightly more than needed for filtering headroom
+        : topK + 2;
 
-    // Final limit after merging, filtering, and dedup
     const finalLimit = topK;
 
-    // ── Run embedding + both searches in parallel ────────────────────────
+    // ── Run embedding + keyword search in parallel ──────────────────────
     const embeddingStart = Date.now();
 
     const [queryEmbedding, keywordResults] = await Promise.all([
@@ -146,10 +158,17 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
         (async () => {
             const kwStart = Date.now();
             try {
-                const results = (await keywordSearch(query, namespaces, finalLimit + 4))
-                    .map(chunk => enrichChunk(chunk, targetMeta));
+                // Keyword search with timeout — if MongoDB is slow, skip it
+                const results = await withTimeout(
+                    keywordSearch(query, namespaces, finalLimit + 4),
+                    KEYWORD_TIMEOUT_MS,
+                    []
+                );
                 timings.keywordSearchMs = Date.now() - kwStart;
-                return results;
+                if (results.length === 0 && Date.now() - kwStart >= KEYWORD_TIMEOUT_MS) {
+                    console.log(`[RETRIEVAL] Keyword search timed out after ${KEYWORD_TIMEOUT_MS}ms, using semantic-only`);
+                }
+                return results.map(chunk => enrichChunk(chunk, targetMeta));
             } catch (e) {
                 console.error("[RETRIEVAL] Keyword search failed:", e.message);
                 timings.keywordSearchMs = Date.now() - kwStart;
@@ -160,7 +179,7 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
 
     timings.embeddingMs = Date.now() - embeddingStart;
 
-    // ── Vector search (needs embedding, so runs after embedding completes) ──
+    // ── Vector search (parallel across all namespaces) ──────────────────
     const vectorStart = Date.now();
     const semanticResponses = await Promise.allSettled(
         targets.map(async target => {
@@ -197,7 +216,6 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
     console.log(`[RETRIEVAL] After similarity threshold (>=${SIMILARITY_THRESHOLD}): ${filteredSemantic.length}`);
 
     // ── Low-confidence bail-out ──────────────────────────────────────────
-    // If the BEST semantic score is below threshold, the documents likely don't contain the answer
     const bestScore = filteredSemantic.length > 0
         ? Math.max(...filteredSemantic.map(c => c.semanticScore || 0))
         : 0;

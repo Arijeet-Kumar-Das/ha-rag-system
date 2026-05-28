@@ -11,7 +11,10 @@ import { protect } from "./middleware/authMiddleware.js";
 const app = express();
 
 app.use(cors({
-    origin: "*",
+    origin: process.env.NODE_ENV === 'production' 
+        ? ['https://your-frontend-domain.com'] // Replace with your actual frontend domain
+        : ['http://localhost:3000', 'http://localhost:5173'], // Common dev ports for React/Vite
+    credentials: true,
     exposedHeaders: ["X-Chat-Id"],
 }));
 app.use(express.json());

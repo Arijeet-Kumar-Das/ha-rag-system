@@ -4,14 +4,14 @@ import { Pinecone } from '@pinecone-database/pinecone';
 
 async function test() {
     const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-    const index = pc.Index("ha-rag-index");
+    const index = pc.index("ha-rag-index"); // Fixed: use lowercase 'index' method
     
     try {
-        console.log("Testing array syntax...");
+        console.log("Testing Pinecone connection...");
         await index.namespace("test-ns").deleteAll();
-        console.log("Array syntax passed");
+        console.log("Pinecone connection successful!");
     } catch (e) {
-        console.error("Array syntax failed:");
+        console.error("Pinecone connection failed:");
         console.error(e);
     }
 }

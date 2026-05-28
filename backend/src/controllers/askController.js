@@ -25,14 +25,20 @@ const toDocumentTarget = (doc) => ({
     fileName: doc.fileName
 });
 
-const persistAssistantMessage = async (chatId, content, sources = []) => {
-    await Message.create({
-        chatId,
-        role: "assistant",
-        content,
-        sources
+/**
+ * Fire-and-forget: persist in the background without blocking the response.
+ */
+const persistInBackground = (fn) => {
+    fn().catch(err => console.error("[ASK] Background persist error:", err.message));
+};
+
+const persistAssistantMessage = (chatId, content, sources = []) => {
+    persistInBackground(async () => {
+        await Promise.all([
+            Message.create({ chatId, role: "assistant", content, sources }),
+            Chat.findByIdAndUpdate(chatId, { updatedAt: new Date() })
+        ]);
     });
-    await Chat.findByIdAndUpdate(chatId, { updatedAt: new Date() });
 };
 
 const streamStaticAnswer = async (stream, chatId, answer, sources = [], verification = null) => {
@@ -41,7 +47,7 @@ const streamStaticAnswer = async (stream, chatId, answer, sources = [], verifica
     stream.send("done", { answer });
     stream.close();
 
-    await persistAssistantMessage(chatId, answer, sources);
+    persistAssistantMessage(chatId, answer, sources);
 };
 
 const streamError = (stream, message) => {
@@ -54,7 +60,7 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
     const requestedDocumentId = documentId || existingChat?.documentId || null;
 
     if (requestedWorkspaceId) {
-        const workspace = await Workspace.findOne({ _id: requestedWorkspaceId, userId });
+        const workspace = await Workspace.findOne({ _id: requestedWorkspaceId, userId }).lean();
         if (!workspace) {
             throw createHttpError(404, "Workspace not found");
         }
@@ -70,7 +76,7 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
         const requestedSet = new Set(requestedDocumentIds);
 
         const workspaceDocs = workspaceDocumentIds.length
-            ? await Document.find({ _id: { $in: workspaceDocumentIds }, userId }).sort({ uploadDate: -1 })
+            ? await Document.find({ _id: { $in: workspaceDocumentIds }, userId }).lean().sort({ uploadDate: -1 })
             : [];
         let targetDocs = workspaceDocs.filter(doc => requestedSet.has(doc._id.toString()));
 
@@ -88,12 +94,12 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
     }
 
     if (requestedDocumentId) {
-        const doc = await Document.findById(requestedDocumentId);
+        const doc = await Document.findById(requestedDocumentId).lean();
         if (!doc) {
             throw createHttpError(404, "Selected document not found");
         }
 
-        if (doc.userId !== userId) {
+        if (String(doc.userId) !== String(userId)) {
             throw createHttpError(403, "Not authorized to access this document");
         }
 
@@ -106,7 +112,7 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
         };
     }
 
-    const latestDoc = await Document.findOne({ userId }).sort({ uploadDate: -1 });
+    const latestDoc = await Document.findOne({ userId }).lean().sort({ uploadDate: -1 });
     if (!latestDoc) {
         return {
             workspace: null,
@@ -170,14 +176,17 @@ export const askQuestion = async (req, res) => {
         let existingChat = null;
 
         if (targetChatId) {
-            existingChat = await Chat.findById(targetChatId);
+            existingChat = await Chat.findById(targetChatId).lean();
             if (!existingChat) return res.status(404).json({ error: "Chat not found" });
 
-            if (existingChat.userId !== userId) {
+            if (String(existingChat.userId) !== String(userId)) {
                 return res.status(403).json({ error: "Not authorized to access this chat" });
             }
 
-            chatHistory = await Message.find({ chatId: targetChatId }).sort({ createdAt: 1 });
+            chatHistory = await Message.find({ chatId: targetChatId })
+                .sort({ createdAt: 1 })
+                .limit(8)
+                .lean();
             console.log("[ASK] Chat history length:", chatHistory.length);
         }
 
@@ -189,7 +198,6 @@ export const askQuestion = async (req, res) => {
 
         // Handle DB queries
         if (classification.type === "db") {
-            // Setup stream for DB response
             const scope = await resolveQuestionScope({ userId, workspaceId, documentId, documentIds, existingChat });
             const activeDocumentIds = scope.targetDocs.map(doc => doc._id.toString());
 
@@ -205,7 +213,8 @@ export const askQuestion = async (req, res) => {
                 targetChatId = newChat._id;
             }
 
-            await Message.create({ chatId: targetChatId, role: "user", content: question });
+            // Fire-and-forget user message
+            persistInBackground(() => Message.create({ chatId: targetChatId, role: "user", content: question }));
 
             res.setHeader("X-Chat-Id", targetChatId.toString());
             stream = createSseStream(req, res);
@@ -243,19 +252,21 @@ export const askQuestion = async (req, res) => {
             });
             targetChatId = newChat._id;
         } else {
-            await Chat.findByIdAndUpdate(targetChatId, {
+            // Fire-and-forget chat update
+            persistInBackground(() => Chat.findByIdAndUpdate(targetChatId, {
                 documentId: scope.targetDocumentId,
                 workspaceId: scope.workspaceId,
                 activeDocumentIds,
                 updatedAt: new Date()
-            });
+            }));
         }
 
-        await Message.create({
+        // Fire-and-forget user message persistence
+        persistInBackground(() => Message.create({
             chatId: targetChatId,
             role: "user",
             content: question
-        });
+        }));
 
         // ── 4. Setup SSE stream ──────────────────────────────────────────
         res.setHeader("X-Chat-Id", targetChatId.toString());
@@ -289,7 +300,7 @@ export const askQuestion = async (req, res) => {
             return;
         }
 
-        // ── 6. Retrieve relevant chunks (adaptive topK, parallel search) ──
+        // ── 6. Retrieve relevant chunks ─────────────────────────────────
         stream.send("status", { stage: "retrieving" });
         const retrievalStart = Date.now();
 
@@ -322,7 +333,7 @@ export const askQuestion = async (req, res) => {
             return;
         }
 
-        // ── 9. Build sources (only include chunks above quality bar) ─────
+        // ── 9. Build sources ─────────────────────────────────────────────
         const sources = chunks.map(c => ({
             text: c.text,
             fileName: c.fileName,
@@ -382,8 +393,9 @@ export const askQuestion = async (req, res) => {
         stream.send("done", { answer: fullAnswer });
         stream.close();
 
+        // Persist and cache in background — don't block
         if (fullAnswer) {
-            await persistAssistantMessage(targetChatId, fullAnswer, sources);
+            persistAssistantMessage(targetChatId, fullAnswer, sources);
             setCache(question, { answer: fullAnswer, sources, verification }, scope.cacheScope);
         }
 

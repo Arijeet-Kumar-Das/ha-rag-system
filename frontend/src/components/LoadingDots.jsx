@@ -1,25 +1,50 @@
 export default function LoadingDots() {
   return (
-    <div className="flex w-full gap-3 py-3">
-      {/* Avatar */}
-      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400">
-        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4Z" />
-        </svg>
-      </div>
+    <div style={{ display: 'flex', width: '100%', gap: 'var(--space-4)', padding: 'var(--space-6) 0' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{
+          fontSize: 'var(--text-xs)', fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.08em', color: 'var(--accent)', marginBottom: 'var(--space-3)',
+        }}>
+          HA-RAG
+        </div>
 
-      <div className="flex flex-col items-start">
-        <span className="mb-1 text-[10px] font-medium uppercase tracking-wider text-violet-400/60">
-          Assistant
-        </span>
-        <div className="rounded-2xl rounded-bl-md border border-white/[0.06] bg-white/[0.03] px-5 py-3.5">
-          <div className="flex items-center gap-1.5">
-            <span className="block h-2 w-2 animate-pulse rounded-full bg-violet-400" />
-            <span className="block h-2 w-2 animate-pulse rounded-full bg-indigo-400" style={{ animationDelay: '0.15s' }} />
-            <span className="block h-2 w-2 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '0.3s' }} />
+        {/* Animated typing indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+            {[0, 1, 2].map(i => (
+              <span
+                key={i}
+                style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: 'var(--accent)',
+                  opacity: 0.4,
+                  animation: `pulse-subtle 1.2s ease-in-out ${i * 0.2}s infinite`,
+                }}
+              />
+            ))}
           </div>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+            Searching documents...
+          </span>
+        </div>
+
+        {/* Skeleton lines for the response */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          {[100, 95, 72].map((w, i) => (
+            <div
+              key={i}
+              className="skeleton"
+              style={{
+                height: 14,
+                borderRadius: 'var(--radius-sm)',
+                width: `${w}%`,
+                animationDelay: `${i * 0.1}s`,
+              }}
+            />
+          ))}
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -16,5 +16,5 @@ const getClient = () => {
 const indexName = "ha-rag-index";
 
 export const getIndex = () => {
-    return getClient().index(indexName);
+    return getClient().index(indexName); // Fixed: use lowercase 'index' method
 };

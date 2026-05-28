@@ -3,6 +3,27 @@ import "dotenv/config";
 import app from "./app.js";
 import connectDB from "./config/db.js";
 
+// Environment validation
+const requiredEnvVars = [
+  'MONGO_URI',
+  'JWT_SECRET',
+  'OPENAI_API_KEY',
+  'PINECONE_API_KEY',
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'CLOUDINARY_API_SECRET'
+];
+
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+
+if (missingEnvVars.length > 0) {
+  console.error('❌ Missing required environment variables:');
+  missingEnvVars.forEach(envVar => console.error(`   - ${envVar}`));
+  console.error('\n📝 Please check your .env file and ensure all required variables are set.');
+  console.error('💡 Refer to .env.example for the required format.');
+  process.exit(1);
+}
+
 // Global Error Handlers
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled Rejection:", err);

@@ -1,1039 +1,698 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
-import ThemeToggle from "../components/ThemeToggle";
-import { useState, useEffect, useRef } from "react";
-import logo from "../assets/logo.png";
+import { motion } from "framer-motion";
+import Button from "../components/ui/Button";
+import useLogo from "../hooks/useLogo";
 
-/* ─────────────────────────────────────────
-   Feature card data
-───────────────────────────────────────── */
-const featureCards = [
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.55, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
+
+const features = [
   {
+    title: "Verified Citations",
+    desc: "Every claim is traced back to the exact paragraph in your source PDF. No hallucinations.",
     icon: (
       <svg
+        width="20"
+        height="20"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.5"
-        style={{ width: 22, height: 22 }}
-      >
-        <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="16" y1="13" x2="8" y2="13" />
-        <line x1="16" y1="17" x2="8" y2="17" />
-      </svg>
-    ),
-    number: "01",
-    title: "Upload Documents",
-    desc: "Drop your PDFs and let AI index them for instant, semantic retrieval.",
-    tag: "Ingest",
-  },
-  {
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        style={{ width: 22, height: 22 }}
-      >
-        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-      </svg>
-    ),
-    number: "02",
-    title: "Ask Questions",
-    desc: "Get context-aware, grounded answers drawn directly from your documents.",
-    tag: "Query",
-  },
-  {
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        style={{ width: 22, height: 22 }}
       >
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         <path d="m9 12 2 2 4-4" />
       </svg>
     ),
-    number: "03",
-    title: "Verified Answers",
-    desc: "Every response is cross-checked against source documents for accuracy.",
-    tag: "Verify",
+  },
+  {
+    title: "Workspace Silos",
+    desc: "Group related papers into isolated workspaces to prevent cross-contamination of sources.",
+    icon: (
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "Confidence Scoring",
+    desc: "Every answer is graded on a confidence scale — green, amber, or red — so you know what to trust.",
+    icon: (
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      >
+        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+      </svg>
+    ),
   },
 ];
 
-/* ─────────────────────────────────────────
-   Intersection-observer reveal hook
-───────────────────────────────────────── */
-function useReveal(threshold = 0.15) {
-  const ref = useRef(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          obs.disconnect();
-        }
-      },
-      { threshold },
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-  return [ref, visible];
-}
+/* ── RAG Pipeline Visual ─────────────────────────────────────────── */
+function PipelineVisual({ isDark }) {
+  const accent = "#c9a55a";
+  const accentFaint = isDark
+    ? "rgba(201,165,90,0.12)"
+    : "rgba(201,165,90,0.08)";
+  const border = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.07)";
+  const surface = isDark ? "rgba(255,255,255,0.04)" : "#fff";
+  const textPrimary = isDark ? "rgba(255,255,255,0.88)" : "#1a1a1a";
+  const textSecondary = isDark ? "rgba(255,255,255,0.45)" : "#888";
+  const connectorColor = isDark
+    ? "rgba(201,165,90,0.3)"
+    : "rgba(201,165,90,0.35)";
 
-/* ─────────────────────────────────────────
-   Main component
-───────────────────────────────────────── */
-const LandingPage = () => {
-  const { isAuthenticated, demoLogin } = useAuth();
-  const { isDark, t } = useTheme();
-  const navigate = useNavigate();
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [featRef, featVisible] = useReveal();
-  const [statsRef, statsVisible] = useReveal(0.2);
-
-  useEffect(() => {
-    const id = setTimeout(() => setMounted(true), 80);
-    return () => clearTimeout(id);
-  }, []);
-
-  const handleDemo = async () => {
-    setIsDemoLoading(true);
-    try {
-      await demoLogin();
-      navigate("/dashboard");
-    } catch {
-    } finally {
-      setIsDemoLoading(false);
-    }
+  const nodeStyle = {
+    background: surface,
+    border: `1px solid ${border}`,
+    borderRadius: 10,
+    padding: "14px 16px",
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
   };
 
-  /* ── colour tokens ── */
-  const bg = isDark ? "#0a0a0f" : "#fafbff";
-  const surface = isDark ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.85)";
-  const surfaceH = isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,1)";
-  const border = isDark ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.09)";
-  const borderH = isDark ? "rgba(99,102,241,0.5)" : "rgba(79,70,229,0.35)";
-  const txt = isDark ? "#f8fafc" : "#0f172a";
-  const txtSub = isDark ? "#8892a4" : "#4b5563";
-  const txtFaint = isDark ? "#374151" : "#9ca3af";
-  const gridCol = isDark ? "rgba(255,255,255,0.028)" : "rgba(15,23,42,0.038)";
+  const iconBoxStyle = {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    background: accentFaint,
+    border: `1px solid rgba(201,165,90,0.2)`,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: accent,
+  };
 
-  /* gradient strings used in CSS classes (not inline) */
-  const gradA = isDark ? "#6366f1" : "#4f46e5";
-  const gradB = isDark ? "#8b5cf6" : "#7c3aed";
-  const gradBtn = `linear-gradient(135deg, ${gradA} 0%, ${gradB} 100%)`;
-
-  /* card accent palettes */
-  const palettes = isDark
-    ? [
-        {
-          bg: "rgba(139,92,246,0.12)",
-          fg: "#a78bfa",
-          tag: "rgba(139,92,246,0.2)",
-        },
-        {
-          bg: "rgba(6,182,212,0.12)",
-          fg: "#22d3ee",
-          tag: "rgba(6,182,212,0.2)",
-        },
-        {
-          bg: "rgba(52,211,153,0.12)",
-          fg: "#34d399",
-          tag: "rgba(52,211,153,0.2)",
-        },
-      ]
-    : [
-        {
-          bg: "rgba(99,102,241,0.09)",
-          fg: "#4f46e5",
-          tag: "rgba(99,102,241,0.12)",
-        },
-        {
-          bg: "rgba(14,165,233,0.09)",
-          fg: "#0284c7",
-          tag: "rgba(14,165,233,0.12)",
-        },
-        {
-          bg: "rgba(16,185,129,0.09)",
-          fg: "#059669",
-          tag: "rgba(16,185,129,0.12)",
-        },
-      ];
-
-  /* ── hero words for staggered reveal ── */
-  const heroWords = [
-    { text: "Chat", gradient: false },
-    { text: "with", gradient: false },
-    { text: "your", gradient: false },
-    { text: "documents", gradient: true },
-    { text: "using", gradient: false },
-    { text: "AI", gradient: false },
+  const steps = [
+    {
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+      ),
+      label: "Source PDFs",
+      sub: "Upload academic papers into a workspace",
+      badge: null,
+    },
+    {
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <ellipse cx="12" cy="5" rx="9" ry="3" />
+          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+        </svg>
+      ),
+      label: "Vector index",
+      sub: "Chunks embedded into Pinecone",
+      badge: "Pinecone",
+    },
+    {
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      ),
+      label: "Semantic retrieval",
+      sub: "Top-k chunks matched to your query",
+      badge: "RAG",
+    },
+    {
+      icon: (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+        >
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+        </svg>
+      ),
+      label: "Grounded answer",
+      sub: "GPT-4 responds using only retrieved context",
+      badge: "GPT-4",
+    },
   ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.7, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+      style={{ width: "100%", maxWidth: 340 }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 500,
+          color: textSecondary,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          marginBottom: 20,
+        }}
+      >
+        How it works
+      </div>
+
+      {steps.map((step, i) => (
+        <div key={i}>
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.4 + i * 0.1 }}
+            style={nodeStyle}
+          >
+            <div style={iconBoxStyle}>{step.icon}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 3,
+                }}
+              >
+                <span
+                  style={{ fontSize: 13, fontWeight: 500, color: textPrimary }}
+                >
+                  {step.label}
+                </span>
+                {step.badge && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 500,
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                      background: accentFaint,
+                      border: `1px solid rgba(201,165,90,0.2)`,
+                      color: accent,
+                      letterSpacing: "0.03em",
+                    }}
+                  >
+                    {step.badge}
+                  </span>
+                )}
+              </div>
+              <div
+                style={{ fontSize: 12, color: textSecondary, lineHeight: 1.5 }}
+              >
+                {step.sub}
+              </div>
+            </div>
+          </motion.div>
+
+          {i < steps.length - 1 && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 + i * 0.1 }}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                paddingLeft: 17,
+              }}
+            >
+              <div
+                style={{ width: 1, height: 20, background: connectorColor }}
+              />
+              <div
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background: accent,
+                  marginLeft: -2,
+                }}
+              />
+              <div style={{ height: 4 }} />
+            </motion.div>
+          )}
+        </div>
+      ))}
+
+      {/* Grounded badge */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.9 }}
+        style={{
+          marginTop: 20,
+          padding: "10px 14px",
+          borderRadius: 8,
+          background: isDark
+            ? "rgba(82,185,123,0.08)"
+            : "rgba(82,185,123,0.07)",
+          border: `1px solid ${isDark ? "rgba(82,185,123,0.18)" : "rgba(82,185,123,0.2)"}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#52b97b"
+          strokeWidth="2"
+        >
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+        <span
+          style={{
+            fontSize: 12,
+            color: isDark ? "#7dcf9e" : "#2d7a50",
+            fontWeight: 500,
+          }}
+        >
+          Every answer is grounded — no hallucinations
+        </span>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* ── Main ────────────────────────────────────────────────────────── */
+export default function LandingPage() {
+  const { user } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const logo = useLogo();
 
   return (
     <div
       style={{
-        background: bg,
         minHeight: "100vh",
-        overflowX: "hidden",
+        background: "var(--bg-primary)",
+        display: "flex",
+        flexDirection: "column",
         position: "relative",
-        fontFamily: "'Inter', sans-serif",
+        overflow: "hidden",
       }}
     >
-      {/* ═══════════════ GLOBAL STYLES ═══════════════ */}
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Geist+Mono:wght@400;500&display=swap');
-
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        /* ── gradient text utility ── */
-        .ha-grad-text {
-          background: linear-gradient(135deg, ${gradA} 0%, ${gradB} 100%);
-          -webkit-background-clip: text;
-          background-clip: text;
-          -webkit-text-fill-color: transparent;
-          color: transparent;
-          display: inline-block;
-        }        /* ── hero word entrance ── */
-        .ha-word {
-          display: inline-block;
-          margin-right: 0.2em;
-          opacity: 0;
-          transform: translateY(20px);
-          transition: opacity 0.55s cubic-bezier(.22,1,.36,1), transform 0.55s cubic-bezier(.22,1,.36,1);
-        }
-        .ha-word.in { opacity: 1; transform: translateY(0); }
-
-        /* ── fade-up utility ── */
-        .ha-fade { opacity: 0; transform: translateY(14px); transition: opacity 0.65s ease, transform 0.65s ease; }
-        .ha-fade.in { opacity: 1; transform: translateY(0); }
-
-        /* ── buttons ── */
-        .ha-btn-primary {
-          display: inline-flex; align-items: center; gap: 8px;
-          height: 50px; padding: 0 28px; border-radius: 10px;
-          font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600;
-          color: #fff; text-decoration: none; border: none; cursor: pointer;
-          background: ${gradBtn};
-          box-shadow: 0 4px 20px ${isDark ? "rgba(99,102,241,0.4)" : "rgba(79,70,229,0.3)"};
-          position: relative; overflow: hidden;
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-          letter-spacing: -0.01em;
-        }
-        .ha-btn-primary::before {
-          content: ''; position: absolute; inset: 0;
-          background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 55%);
-          opacity: 0; transition: opacity 0.2s;
-        }
-        .ha-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 30px ${isDark ? "rgba(99,102,241,0.5)" : "rgba(79,70,229,0.42)"}; }
-        .ha-btn-primary:hover::before { opacity: 1; }
-        .ha-btn-primary:active { transform: translateY(0); }
-
-        .ha-btn-ghost {
-          display: inline-flex; align-items: center; gap: 8px;
-          height: 50px; padding: 0 28px; border-radius: 10px;
-          font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600;
-          text-decoration: none; cursor: pointer; background: transparent;
-          border: 1px solid ${isDark ? "rgba(255,255,255,0.12)" : "rgba(15,23,42,0.14)"};
-          color: ${isDark ? "#e2e8f0" : "#334155"};
-          transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
-          letter-spacing: -0.01em;
-        }
-        .ha-btn-ghost:hover { transform: translateY(-2px); background: ${isDark ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.04)"}; border-color: ${isDark ? "rgba(255,255,255,0.22)" : "rgba(15,23,42,0.25)"}; }
-        .ha-btn-ghost:active { transform: translateY(0); }
-        .ha-btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
-
-        /* ── nav link ── */
-        .ha-nav-link {
-          display: inline-flex; align-items: center; height: 38px; padding: 0 14px;
-          border-radius: 8px; font-size: 13px; font-weight: 500; text-decoration: none;
-          color: ${txtSub}; font-family: 'Inter', sans-serif;
-          transition: color 0.2s, background 0.2s;
-        }
-        .ha-nav-link:hover { color: ${txt}; background: ${isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)"}; }
-
-        /* ── spinning ring ── */
-        .ha-ring { animation: ha-spin 14s linear infinite; }
-        @keyframes ha-spin { to { transform: rotate(360deg); } }
-
-        /* ── badge dot pulse ── */
-        .ha-dot { animation: ha-dotpulse 2.2s ease-in-out infinite; }
-        @keyframes ha-dotpulse {
-          0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.5); }
-          50%      { box-shadow: 0 0 0 6px rgba(52,211,153,0); }
-        }
-
-        /* ── ticker ── */
-        .ha-ticker-wrap { overflow: hidden; }
-        .ha-ticker-track {
-          display: flex; gap: 0; width: max-content;
-          animation: ha-scroll 22s linear infinite;
-        }
-        @keyframes ha-scroll { to { transform: translateX(-50%); } }
-
-        /* ── feature card ── */
-        .ha-card {
-          position: relative; overflow: hidden;
-          transition: transform 0.32s cubic-bezier(.22,1,.36,1),
-                      box-shadow 0.32s ease, border-color 0.22s ease, background 0.22s ease;
-        }
-        .ha-card:hover { transform: translateY(-6px); }
-
-        /* ── loader spin ── */
-        .ha-spin-sm { animation: ha-spin 0.7s linear infinite; }
-
-        /* ── noise texture overlay ── */
-        .ha-noise {
-          position: fixed; inset: 0; pointer-events: none; z-index: 999; opacity: ${isDark ? "0.025" : "0.018"};
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-          background-size: 180px 180px;
-        }
-
-        /* ── diagonal accent line ── */
-        .ha-diag {
-          position: absolute; pointer-events: none;
-          width: 2px; height: 220px;
-          background: linear-gradient(180deg, transparent, ${isDark ? "rgba(139,92,246,0.25)" : "rgba(99,102,241,0.18)"}, transparent);
-          transform: rotate(25deg); border-radius: 2px;
-        }
-
-        /* ── grid ── */
-        .ha-grid {
-          position: absolute; inset: 0; pointer-events: none;
-          background-image:
-            linear-gradient(${gridCol} 1px, transparent 1px),
-            linear-gradient(90deg, ${gridCol} 1px, transparent 1px);
-          background-size: 64px 64px;
-          mask-image: radial-gradient(ellipse 85% 65% at 50% 0%, black 0%, transparent 100%);
-        }
-
-        /* ── glow orb ── */
-        .ha-orb {
-          position: absolute; border-radius: 50%; pointer-events: none;
-          filter: blur(110px);
-        }
-      `}</style>
-
-      {/* Noise grain */}
-      <div className="ha-noise" />
-
-      {/* ═══════════════ BACKGROUND ═══════════════ */}
+      {/* Ambient glow */}
       <div
-        className="ha-orb"
         style={{
-          width: 600,
+          position: "absolute",
+          top: "-10%",
+          left: "-5%",
+          width: 700,
           height: 600,
-          top: "-15%",
-          left: "-12%",
-          background: isDark
-            ? "rgba(99,102,241,0.07)"
-            : "rgba(99,102,241,0.05)",
-          zIndex: 0,
-        }}
-      />
-      <div
-        className="ha-orb"
-        style={{
-          width: 500,
-          height: 500,
-          top: "30%",
-          right: "-8%",
-          background: isDark ? "rgba(6,182,212,0.05)" : "rgba(14,165,233,0.05)",
-          zIndex: 0,
-        }}
-      />
-      <div
-        className="ha-orb"
-        style={{
-          width: 300,
-          height: 300,
-          bottom: "8%",
-          left: "25%",
-          background: isDark
-            ? "rgba(52,211,153,0.04)"
-            : "rgba(16,185,129,0.04)",
+          background:
+            "radial-gradient(ellipse, rgba(201,165,90,0.05) 0%, transparent 65%)",
+          pointerEvents: "none",
           zIndex: 0,
         }}
       />
 
-      <div className="ha-grid" style={{ zIndex: 1 }} />
-
-      {/* diagonal accents */}
-      <div
-        className="ha-diag"
-        style={{ top: "12%", right: "18%", zIndex: 1 }}
-      />
-      <div
-        className="ha-diag"
-        style={{
-          top: "55%",
-          left: "8%",
-          zIndex: 1,
-          transform: "rotate(-20deg)",
-        }}
-      />
-
-      {/* ═══════════════ NAVBAR ═══════════════ */}
+      {/* ── Navbar ── */}
       <nav
         style={{
           position: "relative",
-          zIndex: 30,
+          zIndex: 10,
+          padding: "0 48px",
+          height: 64,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "0 32px",
-          height: 64,
-          borderBottom: `1px solid ${border}`,
-          backdropFilter: "blur(20px)",
-          background: isDark ? "rgba(10,10,15,0.7)" : "rgba(250,251,255,0.8)",
+          borderBottom: "1px solid var(--border-color)",
         }}
       >
-        {/* Logo mark */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img
-            src={logo}
-            alt="HA-RAG"
-            style={{ width: 36, height: 36, objectFit: "contain" }}
-          />
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <span
-              style={{
-                fontFamily: "'Inter', sans-serif",
-                fontSize: 15,
-                fontWeight: 700,
-                color: txt,
-                lineHeight: 1.1,
-                letterSpacing: "-0.03em",
-              }}
-            >
-              HA-RAG
-            </span>
-            <span
-              style={{
-                fontSize: 9,
-                color: txtFaint,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                marginTop: 2,
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              System v2.0
-            </span>
-          </div>
-        </div>
+        <Link
+          to="/"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            textDecoration: "none",
+          }}
+        >
+          <img src={logo} alt="HA-RAG" style={{ height: 32, width: "auto" }} />
+          <span
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "-0.03em",
+              color: "var(--text-primary)",
+            }}
+          >
+            HA-RAG
+          </span>
+        </Link>
 
-        {/* Right actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <ThemeToggle />
-          {isAuthenticated ? (
-            <Link
-              to="/dashboard"
-              className="ha-btn-primary"
-              style={{ height: 38, padding: "0 18px", fontSize: 13 }}
-            >
-              Dashboard
+        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+          <button
+            onClick={toggleTheme}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--text-tertiary)",
+              padding: 6,
+              display: "flex",
+              borderRadius: 6,
+            }}
+          >
+            {isDark ? (
               <svg
-                style={{ width: 13, height: 13 }}
+                width="17"
+                height="17"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="1.8"
               >
-                <path d="M5 12h14" />
-                <path d="m12 5 7 7-7 7" />
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
               </svg>
+            ) : (
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
+                <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+              </svg>
+            )}
+          </button>
+
+          {user ? (
+            <Link to="/dashboard">
+              <Button size="sm">Dashboard</Button>
             </Link>
           ) : (
             <>
-              <Link to="/login" className="ha-nav-link">
-                Sign In
-              </Link>
               <Link
-                to="/register"
-                className="ha-btn-primary"
-                style={{ height: 38, padding: "0 18px", fontSize: 13 }}
+                to="/login"
+                style={{
+                  color: "var(--text-secondary)",
+                  fontSize: 14,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                }}
               >
-                Get Started
+                Sign in
+              </Link>
+              <Link to="/register">
+                <Button size="sm">Get started</Button>
               </Link>
             </>
           )}
         </div>
       </nav>
 
-      {/* ═══════════════ HERO ═══════════════ */}
-      <section
+      {/* ── Hero ── */}
+      <main
         style={{
           position: "relative",
-          zIndex: 10,
-          display: "flex",
-          flexDirection: "column",
+          zIndex: 1,
+          flex: 1,
+          maxWidth: 1160,
+          margin: "0 auto",
+          width: "100%",
+          padding: "80px 48px 80px",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 64,
           alignItems: "center",
-          padding: "88px 32px 72px",
-          fontFamily: "'Geist', sans-serif",
         }}
       >
-        {/* Pill badge */}
-        <div
-          className={`ha-fade${mounted ? " in" : ""}`}
-          style={{
-            transitionDelay: "0ms",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            border: `1px solid ${isDark ? "rgba(139,92,246,0.28)" : "rgba(99,102,241,0.22)"}`,
-            borderRadius: 100,
-            padding: "6px 16px",
-            marginBottom: 40,
-            background: isDark
-              ? "rgba(139,92,246,0.08)"
-              : "rgba(99,102,241,0.06)",
-            backdropFilter: "blur(8px)",
-          }}
-        >
-          <span
-            className="ha-dot"
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              background: "#34d399",
-              flexShrink: 0,
-            }}
-          />
-          <span
+        {/* Left */}
+        <div>
+          <motion.p
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={0}
             style={{
               fontSize: 11,
               fontWeight: 600,
-              letterSpacing: "0.16em",
+              color: "var(--accent)",
               textTransform: "uppercase",
-              color: txtSub,
-              fontFamily: "'Inter', sans-serif",
+              letterSpacing: "0.08em",
+              marginBottom: 24,
             }}
           >
-            AI-Powered Academic Assistant
-          </span>
-        </div>
+            Academic OS 2.0
+          </motion.p>
 
-        {/* ── BIG headline ── */}
-        <h1
-          style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: "clamp(44px, 6vw, 80px)",
-            fontWeight: 800,
-            lineHeight: 1.06,
-            letterSpacing: "-0.035em",
-            textAlign: "center",
-            maxWidth: 860,
-            color: txt,
-            margin: "0 0 28px",
-          }}
-        >
-          {heroWords.map((w, i) =>
-            w.gradient ? (
-              /* Fix: gradient text via CSS class, not inline style */
-              <span
-                key={i}
-                className={`ha-word ha-grad-text${mounted ? " in" : ""}`}
-                style={{ transitionDelay: `${i * 90}ms` }}
-              >
-                {w.text}
-              </span>
-            ) : (
-              <span
-                key={i}
-                className={`ha-word${mounted ? " in" : ""}`}
-                style={{ transitionDelay: `${i * 90}ms`, color: txt }}
-              >
-                {w.text}
-              </span>
-            ),
-          )}
-        </h1>
-
-        {/* Sub */}
-        <p
-          className={`ha-fade${mounted ? " in" : ""}`}
-          style={{
-            transitionDelay: "560ms",
-            maxWidth: 500,
-            textAlign: "center",
-            fontSize: 17,
-            lineHeight: 1.75,
-            color: txtSub,
-            margin: "0 0 44px",
-            fontFamily: "'Inter', sans-serif",
-            fontWeight: 400,
-          }}
-        >
-          Upload PDFs and get instant, grounded answers with full source
-          transparency.{" "}
-          <span
-            style={{ color: isDark ? "#818cf8" : "#4f46e5", fontWeight: 600 }}
+          <motion.h1
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={1}
+            style={{
+              fontSize: "clamp(2.6rem, 4.5vw, 4rem)",
+              fontWeight: 700,
+              letterSpacing: "-0.04em",
+              color: "var(--text-primary)",
+              lineHeight: 1.06,
+              marginBottom: 24,
+            }}
           >
-            No hallucinations
-          </span>{" "}
-          — just facts backed by your documents.
-        </p>
-
-        {/* CTAs */}
-        <div
-          className={`ha-fade${mounted ? " in" : ""}`}
-          style={{
-            transitionDelay: "680ms",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 12,
-            justifyContent: "center",
-          }}
-        >
-          <Link
-            to={isAuthenticated ? "/dashboard" : "/register"}
-            className="ha-btn-primary"
-          >
-            {isAuthenticated ? "Go to Dashboard" : "Get Started Free"}
-            <svg
-              style={{ width: 15, height: 15 }}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <path d="M5 12h14" />
-              <path d="m12 5 7 7-7 7" />
-            </svg>
-          </Link>
-
-          <button
-            onClick={handleDemo}
-            disabled={isDemoLoading}
-            className="ha-btn-ghost"
-          >
-            {isDemoLoading ? (
-              <>
-                <span
-                  className="ha-spin-sm"
-                  style={{
-                    width: 15,
-                    height: 15,
-                    borderRadius: "50%",
-                    border: "2px solid currentColor",
-                    borderTopColor: "transparent",
-                    display: "inline-block",
-                  }}
-                />
-                Loading…
-              </>
-            ) : (
-              <>
-                <svg
-                  style={{ width: 15, height: 15 }}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                </svg>
-                Recruiter Demo
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* ── Stats strip ── */}
-        <div
-          ref={statsRef}
-          style={{
-            marginTop: 70,
-            width: "100%",
-            maxWidth: 700,
-            display: "grid",
-            gridTemplateColumns: "repeat(4,1fr)",
-            border: `1px solid ${border}`,
-            borderRadius: 16,
-            background: surface,
-            backdropFilter: "blur(16px)",
-            overflow: "hidden",
-            opacity: statsVisible ? 1 : 0,
-            transform: statsVisible ? "translateY(0)" : "translateY(16px)",
-            transition: "opacity 0.6s ease 0.1s, transform 0.6s ease 0.1s",
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          {[
-            { val: "RAG", sub: "Architecture" },
-            { val: "GPT-4", sub: "Engine" },
-            { val: "100%", sub: "Grounded" },
-            { val: "Live", sub: "Streaming" },
-          ].map((s, i) => (
-            <div
-              key={s.sub}
+            Research intelligence,{" "}
+            <span
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                padding: "20px 8px",
-                borderRight: i < 3 ? `1px solid ${border}` : "none",
+                fontFamily: "var(--font-serif)",
+                fontStyle: "italic",
+                fontWeight: 500,
+                background:
+                  "linear-gradient(135deg, var(--accent) 0%, #e8c96a 50%, var(--accent) 100%)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
               }}
             >
-              <span
-                style={{
-                  fontFamily: "'Inter', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 20,
-                  color: txt,
-                  letterSpacing: "-0.03em",
-                  lineHeight: 1,
-                }}
-              >
-                {s.val}
-              </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 500,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color: txtFaint,
-                  marginTop: 5,
-                }}
-              >
-                {s.sub}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
+              grounded
+            </span>{" "}
+            in your documents.
+          </motion.h1>
 
-      {/* ═══════════════ TICKER ═══════════════ */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 10,
-          borderTop: `1px solid ${border}`,
-          borderBottom: `1px solid ${border}`,
-          padding: "13px 0",
-          margin: "0 0 88px",
-          background: isDark
-            ? "rgba(255,255,255,0.012)"
-            : "rgba(15,23,42,0.025)",
-          overflow: "hidden",
-        }}
-      >
-        {/* fade edges */}
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 80,
-            background: `linear-gradient(90deg, ${bg}, transparent)`,
-            zIndex: 2,
-            pointerEvents: "none",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 80,
-            background: `linear-gradient(270deg, ${bg}, transparent)`,
-            zIndex: 2,
-            pointerEvents: "none",
-          }}
-        />
-        <div className="ha-ticker-wrap">
-          <div className="ha-ticker-track">
-            {[...Array(2)].flatMap(() =>
-              [
-                "RAG Architecture",
-                "Pinecone Vector DB",
-                "OpenAI GPT-4",
-                "PDF Parsing",
-                "Semantic Search",
-                "Live Streaming",
-                "Source Citations",
-                "Zero Hallucinations",
-              ].map((item, j) => (
-                <span
-                  key={item + j}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 14,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: "0.15em",
-                    textTransform: "uppercase",
-                    color: txtFaint,
-                    padding: "0 28px",
-                    fontFamily: "'Geist', sans-serif",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 3,
-                      height: 3,
-                      borderRadius: "50%",
-                      background: isDark ? "#6366f1" : "#4f46e5",
-                      flexShrink: 0,
-                    }}
-                  />
-                  {item}
-                </span>
-              )),
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ═══════════════ FEATURES ═══════════════ */}
-      <section
-        ref={featRef}
-        style={{
-          position: "relative",
-          zIndex: 10,
-          maxWidth: 1060,
-          margin: "0 auto",
-          padding: "0 32px 100px",
-        }}
-      >
-        {/* Section divider */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 16,
-            marginBottom: 52,
-          }}
-        >
-          <div
+          <motion.p
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={2}
             style={{
-              flex: 1,
-              height: 1,
-              background: `linear-gradient(90deg, transparent, ${border} 60%)`,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-              color: txtFaint,
-              fontFamily: "'Inter', sans-serif",
+              fontSize: 16,
+              color: "var(--text-secondary)",
+              lineHeight: 1.75,
+              marginBottom: 36,
+              maxWidth: 440,
             }}
           >
-            How it works
-          </span>
-          <div
-            style={{
-              flex: 1,
-              height: 1,
-              background: `linear-gradient(90deg, ${border} 40%, transparent)`,
-            }}
-          />
-        </div>
+            Upload academic papers, build targeted workspaces, and query your
+            research with verified, source-grounded answers. No hallucinations —
+            just citations.
+          </motion.p>
 
-        {/* Cards */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 20,
-          }}
-        >
-          {featureCards.map((card, i) => {
-            const pal = palettes[i];
-            return (
-              <div
-                key={card.title}
-                className="ha-card"
-                style={{
-                  border: `1px solid ${border}`,
-                  borderRadius: 18,
-                  background: surface,
-                  backdropFilter: "blur(12px)",
-                  padding: "30px 26px 26px",
-                  opacity: featVisible ? 1 : 0,
-                  transform: featVisible ? "translateY(0)" : "translateY(28px)",
-                  transition: `opacity 0.6s ease ${i * 130}ms, transform 0.6s cubic-bezier(.22,1,.36,1) ${i * 130}ms`,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = surfaceH;
-                  e.currentTarget.style.borderColor = borderH;
-                  e.currentTarget.style.boxShadow = isDark
-                    ? "0 16px 48px rgba(99,102,241,0.12)"
-                    : "0 16px 48px rgba(99,102,241,0.08)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = surface;
-                  e.currentTarget.style.borderColor = border;
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-              >
-                {/* Top row: icon + number */}
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={3}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 52,
+            }}
+          >
+            <Link to={user ? "/dashboard" : "/register"}>
+              <Button size="lg">
+                {user ? "Open workspace" : "Start researching"}
+              </Button>
+            </Link>
+            {!user && (
+              <Link to="/login">
+                <Button variant="secondary" size="lg">
+                  View demo
+                </Button>
+              </Link>
+            )}
+          </motion.div>
+
+          {/* Divider before features */}
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={fadeUp}
+            custom={4}
+          >
+            <div
+              style={{
+                height: 1,
+                background: "var(--border-color)",
+                marginBottom: 32,
+                maxWidth: 440,
+              }}
+            />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+              {features.map((feat, i) => (
                 <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                    marginBottom: 22,
-                  }}
+                  key={i}
+                  style={{ display: "flex", alignItems: "flex-start", gap: 14 }}
                 >
                   <div
                     style={{
-                      width: 46,
-                      height: 46,
-                      borderRadius: 12,
-                      background: pal.bg,
-                      color: pal.fg,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 8,
+                      background: "var(--accent-subtle)",
+                      color: "var(--accent)",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       flexShrink: 0,
+                      marginTop: 1,
                     }}
                   >
-                    {card.icon}
+                    {feat.icon}
                   </div>
-                  {/* Tag pill */}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: "0.14em",
-                      textTransform: "uppercase",
-                      padding: "4px 10px",
-                      borderRadius: 100,
-                      background: pal.tag,
-                      color: pal.fg,
-                    }}
-                  >
-                    {card.tag}
-                  </span>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "var(--text-primary)",
+                        marginBottom: 3,
+                      }}
+                    >
+                      {feat.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.65,
+                      }}
+                    >
+                      {feat.desc}
+                    </div>
+                  </div>
                 </div>
-
-                {/* Big number watermark */}
-                <div
-                  style={{
-                    fontFamily: "'Inter', sans-serif",
-                    fontWeight: 900,
-                    fontSize: 80,
-                    lineHeight: 1,
-                    color: isDark
-                      ? "rgba(255,255,255,0.04)"
-                      : "rgba(0,0,0,0.045)",
-                    position: "absolute",
-                    right: 18,
-                    bottom: 14,
-                    letterSpacing: "-0.06em",
-                    pointerEvents: "none",
-                    userSelect: "none",
-                  }}
-                >
-                  {card.number}
-                </div>
-
-                <h3
-                  style={{
-                    fontSize: 15,
-                    fontWeight: 600,
-                    color: txt,
-                    marginBottom: 10,
-                    letterSpacing: "-0.02em",
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  {card.title}
-                </h3>
-                <p
-                  style={{
-                    fontSize: 13.5,
-                    lineHeight: 1.7,
-                    color: txtSub,
-                    fontFamily: "'Inter', sans-serif",
-                  }}
-                >
-                  {card.desc}
-                </p>
-
-                {/* Bottom accent line */}
-                <div
-                  style={{
-                    height: 2,
-                    borderRadius: 2,
-                    marginTop: 26,
-                    background: `linear-gradient(90deg, ${pal.fg}50, transparent)`,
-                  }}
-                />
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </motion.div>
         </div>
-      </section>
 
-      {/* ═══════════════ FOOTER ═══════════════ */}
+        {/* Right: pipeline */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            borderLeft: "1px solid var(--border-color)",
+            paddingLeft: 56,
+            alignSelf: "stretch",
+          }}
+        >
+          <PipelineVisual isDark={isDark} />
+        </div>
+      </main>
+
+      {/* ── Footer ── */}
       <footer
         style={{
           position: "relative",
-          zIndex: 10,
-          borderTop: `1px solid ${border}`,
-          padding: "18px 32px",
+          zIndex: 1,
+          padding: "24px 48px",
+          borderTop: "1px solid var(--border-color)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 10,
-          background: isDark ? "rgba(10,10,15,0.7)" : "rgba(250,251,255,0.8)",
-          backdropFilter: "blur(20px)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <img
             src={logo}
             alt="HA-RAG"
-            style={{ width: 20, height: 20, objectFit: "contain" }}
+            style={{ height: 20, width: "auto", opacity: 0.5 }}
           />
-          <span style={{ fontSize: 12, color: txtFaint, fontWeight: 500 }}>
-            HA-RAG System v2.0
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+            © {new Date().getFullYear()} HA-RAG System
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          {["Built with RAG", "OpenAI", "Pinecone"].map((s, i) => (
-            <span
-              key={s}
-              style={{
-                fontSize: 11,
-                color: txtFaint,
-                fontWeight: 500,
-                letterSpacing: "0.06em",
-                paddingLeft: i > 0 ? 20 : 0,
-                borderLeft: i > 0 ? `1px solid ${border}` : "none",
-              }}
-            >
-              {s}
-            </span>
-          ))}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {["OpenAI GPT-4", "Pinecone", "RAG", "SSE Streaming"].map(
+            (tech, i) => (
+              <span
+                key={i}
+                style={{
+                  padding: "3px 10px",
+                  borderRadius: 20,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-color)",
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  fontWeight: 500,
+                }}
+              >
+                {tech}
+              </span>
+            ),
+          )}
         </div>
       </footer>
     </div>
   );
-};
-
-export default LandingPage;
+}

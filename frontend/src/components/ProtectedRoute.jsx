@@ -1,29 +1,38 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+export default function ProtectedRoute({ children }) {
+  const { user, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#08080e]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative h-12 w-12">
-            <div className="absolute inset-0 rounded-full border-2 border-violet-500/20"></div>
-            <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-violet-500"></div>
-          </div>
-          <p className="text-sm text-white/30">Loading...</p>
-        </div>
+      <div style={{
+        width: '100vw',
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-primary)',
+      }}>
+        <svg
+          className="animate-spin"
+          style={{ width: 32, height: 32, color: 'var(--accent)' }}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.2" />
+          <path d="M12 2a10 10 0 0 1 10 10" />
+        </svg>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
+  if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   return children;
-};
-
-export default ProtectedRoute;
+}

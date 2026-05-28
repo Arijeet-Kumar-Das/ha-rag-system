@@ -1,31 +1,54 @@
-import { useState } from "react"
-import { useTheme } from '../context/ThemeContext';
+import { useState } from "react";
+import IconButton from "./ui/IconButton";
 
 export default function SourceCard({ sources }) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const { isDark } = useTheme();
+  const [isExpanded, setIsExpanded] = useState(false);
 
-  if (!sources || sources.length === 0) return null
+  if (!sources || sources.length === 0) return null;
 
   return (
-    <div className="w-full">
+    <div style={{ width: '100%', marginTop: 'var(--space-4)' }}>
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-medium transition-all duration-200
-          ${isDark 
-            ? 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:border-white/15 hover:bg-white/[0.06] hover:text-white/80' 
-            : 'border-slate-200 bg-white text-slate-500 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 shadow-sm'}`}
+        className="focus-ring"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          padding: 'var(--space-1) var(--space-3) var(--space-1) var(--space-2)',
+          borderRadius: 'var(--radius)',
+          background: 'var(--bg-elevated)',
+          border: '1px solid var(--border-color)',
+          fontSize: 'var(--text-xs)',
+          fontWeight: 500,
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+          transition: 'all var(--transition-fast)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = 'var(--bg-surface)';
+          e.currentTarget.style.borderColor = 'var(--border-hover)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = 'var(--bg-elevated)';
+          e.currentTarget.style.borderColor = 'var(--border-color)';
+        }}
       >
         <svg
-          className={`h-3 w-3 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+          style={{
+            width: 14,
+            height: 14,
+            transition: 'transform var(--transition-fast)',
+            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+          }}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="2"
         >
           <polyline points="9 18 15 12 9 6" />
         </svg>
-        <svg className={`h-3 w-3 ${isDark ? 'text-white/30' : 'text-slate-400'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg style={{ width: 14, height: 14, color: 'var(--text-tertiary)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" />
           <polyline points="14 2 14 8 20 8" />
         </svg>
@@ -33,35 +56,50 @@ export default function SourceCard({ sources }) {
       </button>
 
       {isExpanded && (
-        <div className="mt-2 flex gap-2.5 overflow-x-auto pb-2">
+        <div style={{
+          marginTop: 'var(--space-3)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-2)',
+        }}>
           {sources.map((source, idx) => (
             <div
               key={idx}
-              className={`min-w-[230px] max-w-[260px] shrink-0 rounded-xl border p-3.5 transition-all duration-200
-                ${isDark 
-                  ? 'border-white/[0.06] bg-white/[0.025] hover:border-violet-500/20 hover:bg-white/[0.04]' 
-                  : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50 shadow-sm'}`}
+              style={{
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                padding: 'var(--space-3) var(--space-4)',
+              }}
             >
-              <div className="mb-2.5 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <svg className={`h-3 w-3 shrink-0 ${isDark ? 'text-violet-400/60' : 'text-indigo-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                  <svg style={{ width: 14, height: 14, color: 'var(--accent)' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" />
                     <polyline points="14 2 14 8 20 8" />
                   </svg>
-                  <span className={`truncate text-[11px] font-medium ${isDark ? 'text-violet-300/80' : 'text-indigo-700'}`}>
-                    {source.fileName || "Unknown"}
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {source.fileName || "Unknown Source"}
                   </span>
                 </div>
-
-                <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold 
-                  ${isDark ? 'bg-white/[0.06] text-white/35' : 'bg-slate-100 text-slate-500'}`}>
-                  #{source.chunkIndex ?? "?"}
+                <span style={{
+                  fontSize: 'var(--text-xs)',
+                  color: 'var(--text-tertiary)',
+                  background: 'var(--bg-elevated)',
+                  padding: '2px 6px',
+                  borderRadius: 'var(--radius-sm)',
+                }}>
+                  Section {source.chunkIndex ?? "?"}
                 </span>
               </div>
-
-              <p className={`text-[11px] leading-5 ${isDark ? 'text-white/40' : 'text-slate-500'}`}>
+              <p style={{
+                fontSize: 'var(--text-xs)',
+                lineHeight: 1.6,
+                color: 'var(--text-secondary)',
+                margin: 0,
+              }}>
                 {source.text
-                  ? `"${source.text.slice(0, 120)}${source.text.length > 120 ? "..." : ""}"`
+                  ? `"${source.text.slice(0, 200)}${source.text.length > 200 ? "..." : ""}"`
                   : "No preview available."}
               </p>
             </div>
@@ -69,5 +107,5 @@ export default function SourceCard({ sources }) {
         </div>
       )}
     </div>
-  )
+  );
 }

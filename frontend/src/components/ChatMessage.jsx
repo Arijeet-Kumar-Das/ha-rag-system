@@ -1,125 +1,141 @@
+import { memo } from "react";
 import SourceCard from "./SourceCard";
-import { useTheme } from '../context/ThemeContext';
+import Badge from "./ui/Badge";
 import ReactMarkdown from 'react-markdown';
 
 function VerificationBadge({ verification }) {
-  if (!verification) return null
+  if (!verification) return null;
 
-  const { isValid, confidence } = verification
+  const { isValid, confidence } = verification;
 
   if (isValid && confidence >= 0.7) {
     return (
-      <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1 border border-emerald-500/20">
-        <svg className="h-3 w-3 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          <path d="m9 12 2 2 4-4" />
+      <Badge variant="success" icon={
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" />
         </svg>
-        <span className="text-[11px] font-medium text-emerald-400">
-          Verified Answer
-        </span>
-        <span className="text-[10px] text-emerald-400/50">
-          {Math.round(confidence * 100)}%
-        </span>
-      </div>
-    )
+      }>
+        Verified ({Math.round(confidence * 100)}%)
+      </Badge>
+    );
   }
 
   if (isValid && confidence >= 0.4) {
     return (
-      <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1 border border-amber-500/20">
-        <svg className="h-3 w-3 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <Badge variant="warning" icon={
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
           <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
-        <span className="text-[11px] font-medium text-amber-400">
-          Partially Supported
-        </span>
-        <span className="text-[10px] text-amber-400/50">
-          {Math.round(confidence * 100)}%
-        </span>
-      </div>
-    )
+      }>
+        Partially Supported
+      </Badge>
+    );
   }
 
-  // Low confidence or invalid
   return (
-    <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-red-500/10 px-2.5 py-1 border border-red-500/20">
-      <svg className="h-3 w-3 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
+    <Badge variant="danger" icon={
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
       </svg>
-      <span className="text-[11px] font-medium text-red-400">
-        Answer may not be fully supported
-      </span>
-      <span className="text-[10px] text-red-400/50">
-        {Math.round(confidence * 100)}%
-      </span>
-    </div>
-  )
+    }>
+      Low Confidence
+    </Badge>
+  );
 }
 
-export default function ChatMessage({ message }) {
-  const { isDark, t } = useTheme();
+/**
+ * Render content as plain pre-wrapped text during streaming,
+ * and as full markdown only after streaming completes.
+ * This avoids re-parsing the entire markdown tree on every token.
+ */
+function MessageContent({ content, streaming }) {
+  if (streaming) {
+    return <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content || ""}</div>;
+  }
+  return (
+    <div className="prose-chat">
+      <ReactMarkdown>{content || ""}</ReactMarkdown>
+    </div>
+  );
+}
+
+const ChatMessage = memo(function ChatMessage({ message }) {
   const isUser = message.role === "user";
 
   return (
-    <div className={`flex w-full gap-3 py-3 ${isUser ? "justify-end" : "justify-start"}`}>
-      {/* Assistant avatar */}
-      {!isUser && (
-        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? 'bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400' : 'bg-indigo-100 text-indigo-600'}`}>
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 3l7 4v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V7l7-4Z" />
-          </svg>
+    <div style={{
+      display: 'flex',
+      width: '100%',
+      padding: 'var(--space-6) 0',
+      borderBottom: isUser ? 'none' : '1px solid var(--border-color)',
+    }}>
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+      }}>
+        {/* Role Label */}
+        <div style={{
+          fontSize: 'var(--text-xs)',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: isUser ? 'var(--text-tertiary)' : 'var(--accent)',
+          marginBottom: 'var(--space-2)',
+        }}>
+          {isUser ? 'You' : 'HA-RAG'}
         </div>
-      )}
 
-      <div className={`flex max-w-[80%] flex-col ${isUser ? "items-end" : "items-start"}`}>
-        {/* Role label */}
-        <span className={`mb-1 text-[10px] font-medium uppercase tracking-wider ${isUser ? t.textFaint : (isDark ? 'text-violet-400/60' : 'text-indigo-500/80')}`}>
-          {isUser ? 'You' : 'Assistant'}
-        </span>
-
-        {/* Message bubble */}
-        <div
-          className={`relative rounded-2xl px-4 py-3 text-[14px] leading-7 transition-all duration-200
-            ${isUser
-              ? "rounded-br-md bg-gradient-to-br from-violet-600/90 to-indigo-600/90 text-white shadow-[0_4px_20px_rgba(139,92,246,0.2)] whitespace-pre-wrap"
-              : `rounded-bl-md border ${t.border} ${isDark ? 'bg-white/[0.03] text-white/85' : 'bg-white text-slate-700 shadow-[0_2px_12px_rgba(0,0,0,0.06)]'}`
-            }`}
-        >
+        {/* Message Content */}
+        <div style={{
+          fontSize: 'var(--text-base)',
+          lineHeight: 1.75,
+          color: 'var(--text-primary)',
+          paddingLeft: isUser ? 'var(--space-4)' : 0,
+          borderLeft: isUser ? '2px solid var(--accent-muted)' : 'none',
+        }}>
           {isUser ? (
-            message.content || ""
+            <div style={{ whiteSpace: 'pre-wrap' }}>{message.content}</div>
           ) : (
-            <div className="prose-chat">
-              <ReactMarkdown>{message.content || ""}</ReactMarkdown>
-            </div>
+            <MessageContent content={message.content} streaming={message.streaming} />
           )}
           {message.streaming && (
-            <span aria-hidden="true" className="ml-1 inline-block h-4 w-1 translate-y-0.5 animate-pulse rounded-full bg-current opacity-70" />
+            <span
+              style={{
+                display: 'inline-block',
+                width: 6,
+                height: 14,
+                background: 'var(--accent)',
+                marginLeft: 4,
+                animation: 'pulse-subtle 1s infinite',
+                transform: 'translateY(2px)',
+              }}
+            />
           )}
         </div>
 
-        {/* Verification badge */}
-        {!isUser && !message.streaming && message.verification && (
-          <VerificationBadge verification={message.verification} />
-        )}
-
-        {/* Sources */}
-        {!isUser && message.sources && message.sources.length > 0 && !message.streaming && (
-          <div className="mt-2 w-full">
-            <SourceCard sources={message.sources} />
+        {/* Verification & Sources */}
+        {!isUser && !message.streaming && (message.verification || (message.sources && message.sources.length > 0)) && (
+          <div style={{ marginTop: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', alignItems: 'flex-start' }}>
+            {message.verification && <VerificationBadge verification={message.verification} />}
+            {message.sources && message.sources.length > 0 && <SourceCard sources={message.sources} />}
           </div>
         )}
       </div>
-
-      {/* User avatar */}
-      {isUser && (
-        <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isDark ? 'bg-white/[0.06] text-white/40' : 'bg-slate-200 text-slate-500'}`}>
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="8" r="4" /><path d="M20 21a8 8 0 10-16 0" />
-          </svg>
-        </div>
-      )}
     </div>
-  )
-}
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison: only re-render when content actually changes
+  const prev = prevProps.message;
+  const next = nextProps.message;
+  return (
+    prev.content === next.content &&
+    prev.streaming === next.streaming &&
+    prev.role === next.role &&
+    prev.verification === next.verification &&
+    prev.sources === next.sources
+  );
+});
+
+export default ChatMessage;

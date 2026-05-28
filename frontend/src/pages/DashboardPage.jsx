@@ -1,219 +1,228 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
-import ThemeToggle from '../components/ThemeToggle';
-import { getDocuments, uploadFile } from '../api';
-import logo from '../assets/logo.png';
+import { getDocuments, uploadFile, getWorkspaces } from '../api';
+import Sidebar from '../components/sidebar/Sidebar';
+import Button from '../components/ui/Button';
+import EmptyState from '../components/ui/EmptyState';
+import Skeleton from '../components/ui/Skeleton';
+import IconButton from '../components/ui/IconButton';
 
-const DashboardPage = () => {
-  const { user, logout } = useAuth();
-  const { isDark, t } = useTheme();
-  const navigate = useNavigate();
+export default function DashboardPage() {
   const [documents, setDocuments] = useState([]);
+  const [workspaces, setWorkspaces] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState('');
-  const [dragActive, setDragActive] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const fileInputRef = useRef(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchDocs();
+    fetchWorkspaces();
+  }, []);
 
   const fetchDocs = async () => {
     try {
-      const docs = await getDocuments();
-      setDocuments(docs);
+      setIsLoading(true);
+      const data = await getDocuments();
+      setDocuments(data || []);
     } catch (err) {
-      console.error('Failed to load documents', err);
+      console.error('Failed to fetch documents', err);
     } finally {
       setIsLoading(false);
     }
   };
 
-  useEffect(() => { fetchDocs(); }, []);
-
-  const handleUpload = async (file) => {
-    if (!file || file.type !== 'application/pdf') return;
-    setIsUploading(true);
-    setUploadProgress(`Processing ${file.name}...`);
+  const fetchWorkspaces = async () => {
     try {
+      const data = await getWorkspaces();
+      setWorkspaces(data || []);
+    } catch (err) {
+      console.error('Failed to fetch workspaces', err);
+    }
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploading(true);
       await uploadFile(file);
-      setUploadProgress('');
       await fetchDocs();
     } catch (err) {
-      setUploadProgress(`Error: ${err.message}`);
-      setTimeout(() => setUploadProgress(''), 3000);
+      alert(`Upload failed: ${err.message}`);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.name.toLowerCase().endsWith('.pdf')) return;
+    try {
+      setIsUploading(true);
+      await uploadFile(file);
+      await fetchDocs();
+    } catch (err) {
+      alert(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleDrop = (e) => { e.preventDefault(); setDragActive(false); handleUpload(e.dataTransfer.files?.[0]); };
-  const handleDragOver = (e) => { e.preventDefault(); setDragActive(true); };
-  const handleDragLeave = () => setDragActive(false);
-  const handleFileInput = (e) => { handleUpload(e.target.files?.[0]); e.target.value = ''; };
-
-  const formatDate = (dateStr) => new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const sidebarProps = {
+    documents,
+    workspaces,
+    chats: [],
+    selectedDocumentId: null,
+    selectedWorkspaceId: null,
+    selectedChatId: null,
+    onSelectDocument: (id) => navigate(`/chat/${id}`),
+    onSelectWorkspace: (ws) => navigate('/chat'),
+    onSelectChat: () => {},
+    onNewChat: () => navigate('/chat'),
+    onDeleteChat: () => {},
+    onDeleteWorkspace: () => {},
+    onOpenWorkspaceModal: () => {},
+  };
 
   return (
-    <div className={`relative min-h-screen ${t.bg}`}>
-      {/* Background */}
-      {isDark && (
-        <>
-          <div className="pointer-events-none absolute top-[5%] right-[10%] h-[400px] w-[400px] rounded-full bg-violet-600/[0.04] blur-[150px]" />
-          <div className="pointer-events-none absolute bottom-[10%] left-[5%] h-[350px] w-[350px] rounded-full bg-indigo-500/[0.03] blur-[130px]" />
-        </>
-      )}
+    <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-primary)' }}>
+      <Sidebar isOpen={sidebarOpen} onToggle={() => setSidebarOpen(false)} {...sidebarProps} />
+      <div style={{ width: 'var(--sidebar-width)', flexShrink: 0 }} className="hidden sm:block" />
 
-      {/* ── Header ── */}
-      <header className={`sticky top-0 z-30 border-b ${t.border} ${isDark ? 'bg-[#08080e]/80' : 'bg-white/80'} backdrop-blur-xl`}>
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5">
-          <div className="flex items-center gap-3">
-            <img src={logo} alt="HA-RAG" className="h-9 w-9 object-contain" />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, height: '100vh', overflow: 'auto' }}>
+        <header style={{
+          display: 'flex', alignItems: 'center', height: 56,
+          padding: '0 var(--space-5)', borderBottom: '1px solid var(--border-color)', flexShrink: 0, gap: 'var(--space-4)',
+        }}>
+          <IconButton className="sm:hidden" onClick={() => setSidebarOpen(true)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </IconButton>
+          <h1 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Dashboard
+          </h1>
+        </header>
+
+        <main style={{ padding: 'var(--space-8) var(--space-6)', maxWidth: 1000, margin: '0 auto', width: '100%' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 'var(--space-8)', flexWrap: 'wrap', gap: 'var(--space-4)',
+          }}>
             <div>
-              <h1 className={`text-[15px] font-semibold ${t.text}`}>HA-RAG</h1>
-              <p className={`text-[11px] ${t.textMuted}`}>Dashboard</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
-
-            {/* User badge */}
-            <div className={`hidden items-center gap-2.5 rounded-lg border ${t.border} ${isDark ? 'bg-white/[0.03]' : 'bg-slate-50'} px-3 py-2 sm:flex`}>
-              <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${isDark ? 'bg-violet-500/15' : 'bg-indigo-100'}`}>
-                <svg className={`h-4 w-4 ${t.accent}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="8" r="4" /><path d="M20 21a8 8 0 10-16 0" />
-                </svg>
-              </div>
-              <div>
-                <p className={`text-sm font-medium ${t.text}`}>{user?.name}</p>
-                <p className={`text-[10px] ${t.textMuted}`}>{user?.role === 'demo' ? 'Demo Account' : user?.email}</p>
-              </div>
+              <h2 style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>
+                Library
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
+                {documents.length} document{documents.length !== 1 ? 's' : ''} available for research.
+              </p>
             </div>
 
-            {/* Logout — bigger, clearly visible */}
-            <button
-              onClick={() => { logout(); navigate('/'); }}
-              className={`flex h-10 w-10 sm:w-auto items-center justify-center sm:justify-start gap-2 rounded-lg border sm:px-4 text-sm font-medium transition-all hover:scale-[1.02] active:scale-[0.98]
-                ${isDark
-                  ? 'border-red-500/20 bg-red-500/[0.06] text-red-400 hover:border-red-500/40 hover:bg-red-500/[0.12]'
-                  : 'border-red-200 bg-red-50 text-red-600 hover:border-red-300 hover:bg-red-100'
-                }`}
-            >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-              <span className="hidden sm:inline">Log out</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* ── Main ── */}
-      <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8">
-        {/* Welcome */}
-        <div className="mb-8">
-          <h2 className={`text-2xl font-bold ${t.text}`}>
-            Welcome, <span className={`bg-gradient-to-r ${t.gradientText} bg-clip-text text-transparent`}>{user?.name?.split(' ')[0]}</span>
-          </h2>
-          <p className={`mt-1 text-sm ${t.textMuted}`}>Upload documents and start asking questions</p>
-        </div>
-
-        {/* Upload Zone */}
-        <div
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          className={`group mb-8 flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 sm:p-10 transition-all duration-300
-            ${dragActive
-              ? isDark ? 'border-violet-500/50 bg-violet-500/[0.06]' : 'border-indigo-400 bg-indigo-50'
-              : `${isDark ? 'border-white/[0.1] bg-white/[0.02] hover:border-white/[0.2]' : 'border-slate-300 bg-white hover:border-indigo-300 hover:bg-indigo-50/30'}`
-            }`}
-        >
-          <div className={`mb-3 flex h-14 w-14 items-center justify-center rounded-xl transition-all
-            ${dragActive
-              ? isDark ? 'bg-violet-500/20 text-violet-400 scale-110' : 'bg-indigo-200 text-indigo-600 scale-110'
-              : isDark ? 'bg-white/[0.04] text-white/30' : 'bg-slate-100 text-slate-400'
-            }`}>
-            <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </div>
-          <p className={`text-sm font-medium ${t.textSub}`}>
-            {isUploading ? uploadProgress : 'Drop your PDF here, or'}
-          </p>
-          {!isUploading && (
-            <label className="mt-3 cursor-pointer">
-              <span className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${isDark ? 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/20' : 'bg-indigo-100 text-indigo-600 hover:bg-indigo-200'}`}>
-                Browse files
-              </span>
-              <input type="file" accept="application/pdf" className="hidden" onChange={handleFileInput} disabled={isUploading} />
-            </label>
-          )}
-          {isUploading && (
-            <div className="mt-3 flex items-center gap-2">
-              <span className={`h-4 w-4 animate-spin rounded-full border-2 ${isDark ? 'border-violet-400/30 border-t-violet-400' : 'border-indigo-300 border-t-indigo-600'}`} />
-              <span className={`text-xs ${t.textMuted}`}>Processing document...</span>
-            </div>
-          )}
-          <p className={`mt-3 text-[11px] ${t.textFaint}`}>PDF files only • Max 10 documents</p>
-        </div>
-
-        {/* Documents List */}
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className={`text-[15px] font-semibold ${t.text}`}>Your Documents</h3>
-          <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${isDark ? 'bg-white/[0.06] text-white/30' : 'bg-slate-100 text-slate-400'}`}>
-            {documents.length} document{documents.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <span className={`h-6 w-6 animate-spin rounded-full border-2 ${isDark ? 'border-violet-400/30 border-t-violet-400' : 'border-indigo-300 border-t-indigo-600'}`} />
-          </div>
-        ) : documents.length === 0 ? (
-          <div className={`flex flex-col items-center justify-center rounded-xl border ${t.border} ${isDark ? 'bg-white/[0.02]' : 'bg-white'} py-16`}>
-            <svg className={`h-12 w-12 ${t.textFaint}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
-              <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            <p className={`mt-4 text-sm ${t.textMuted}`}>No documents yet</p>
-            <p className={`mt-1 text-xs ${t.textFaint}`}>Upload a PDF to get started</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {documents.map((doc) => (
-              <button
-                key={doc._id}
-                onClick={() => navigate(`/chat/${doc._id}`)}
-                className={`group flex flex-col rounded-xl border ${t.border} ${isDark ? 'bg-white/[0.02]' : 'bg-white'} p-5 text-left transition-all duration-300 hover:-translate-y-0.5 ${t.borderHover} ${t.cardShadow}`}
-              >
-                <div className="mb-3 flex items-start justify-between">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${isDark ? 'bg-violet-500/15 text-violet-400' : 'bg-indigo-100 text-indigo-600'} transition-colors`}>
-                    <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                  </div>
-                  <svg className={`h-4 w-4 ${t.textFaint} transition-all group-hover:translate-x-0.5 ${isDark ? 'group-hover:text-violet-400' : 'group-hover:text-indigo-500'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+            <input type="file" ref={fileInputRef} onChange={handleUpload} accept=".pdf" style={{ display: 'none' }} />
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+              {isUploading ? (
+                <>
+                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" />
                   </svg>
-                </div>
-                <h4 className={`truncate text-[14px] font-medium ${t.textSub} ${isDark ? 'group-hover:text-white' : 'group-hover:text-slate-900'}`}>{doc.fileName}</h4>
-                <div className={`mt-2.5 flex items-center gap-3 text-[11px] ${t.textMuted}`}>
-                  <span className="flex items-center gap-1">
-                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-                    </svg>
-                    {doc.chunkCount} chunks
-                  </span>
-                  <span>{formatDate(doc.uploadDate)}</span>
-                </div>
-              </button>
-            ))}
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  Upload Document
+                </>
+              )}
+            </Button>
           </div>
-        )}
-      </main>
+
+          {isLoading ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+              {[1, 2, 3].map(i => <Skeleton key={i} height={120} rounded="var(--radius-lg)" />)}
+            </div>
+          ) : documents.length === 0 ? (
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              style={{
+                border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-lg)',
+                transition: 'border-color var(--transition-fast)',
+              }}
+            >
+              <EmptyState
+                icon={
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" />
+                  </svg>
+                }
+                title="No documents yet"
+                description="Upload a PDF or drag it here to begin asking questions and extracting insights."
+                action={<Button onClick={() => fileInputRef.current?.click()}>Upload PDF</Button>}
+              />
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-4)' }}>
+              {documents.map((doc) => (
+                <button
+                  key={doc._id}
+                  onClick={() => navigate(`/chat/${doc._id}`)}
+                  style={{
+                    padding: 'var(--space-5)', borderRadius: 'var(--radius-lg)',
+                    cursor: 'pointer', transition: 'all var(--transition-fast)',
+                    display: 'flex', flexDirection: 'column', gap: 'var(--space-3)',
+                    background: 'var(--bg-surface)', border: '1px solid var(--border-color)',
+                    textAlign: 'left', fontFamily: 'var(--font-sans)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-hover)';
+                    e.currentTarget.style.background = 'var(--bg-elevated)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-color)';
+                    e.currentTarget.style.background = 'var(--bg-surface)';
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 'var(--radius)',
+                      background: 'var(--accent-subtle)', color: 'var(--accent)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M14.5 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="truncate-text" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                        {doc.fileName}
+                      </div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                        {new Date(doc.uploadDate).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{
+                    marginTop: 'auto', paddingTop: 'var(--space-3)',
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 'var(--text-xs)',
+                  }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      {doc.chunkCount} chunk{doc.chunkCount !== 1 ? 's' : ''}
+                    </span>
+                    <span style={{ color: 'var(--accent)', fontWeight: 500 }}>Research →</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
-};
-
-export default DashboardPage;
+}

@@ -10,8 +10,9 @@ export const createSseStream = (req, res) => {
 
     const send = (event, data = {}) => {
         if (closed || res.writableEnded || res.destroyed) return;
-        res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+        // Single write call + explicit flush for minimum latency
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        if (typeof res.flush === "function") res.flush();
     };
 
     const heartbeat = setInterval(() => {

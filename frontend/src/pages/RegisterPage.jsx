@@ -1,159 +1,155 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import ThemeToggle from '../components/ThemeToggle';
-import logo from '../assets/logo.png';
+import { motion } from 'framer-motion';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import useLogo from '../hooks/useLogo';
 
-const RegisterPage = () => {
+export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const { register, demoLogin } = useAuth();
-  const { isDark, t } = useTheme();
+  const { register, demoLogin, loading } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const logo = useLogo();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
-    setIsLoading(true);
+    if (password !== confirmPassword) return setError('Passwords do not match');
     try {
       await register(name, email, password);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
+      setError(err.message || 'Registration failed');
     }
   };
 
-  const handleDemo = async () => {
+  const handleDemoLogin = async () => {
     setError('');
-    setIsDemoLoading(true);
     try {
       await demoLogin();
       navigate('/dashboard');
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsDemoLoading(false);
+      setError(err.message || 'Demo login failed');
     }
   };
 
   return (
-    <div className={`relative flex min-h-screen items-center justify-center overflow-hidden ${t.bg}`}>
-      {isDark ? (
-        <>
-          <div className="pointer-events-none absolute top-[10%] right-[20%] h-[400px] w-[400px] rounded-full bg-indigo-600/[0.07] blur-[150px]" />
-          <div className="pointer-events-none absolute bottom-[20%] left-[15%] h-[350px] w-[350px] rounded-full bg-violet-500/[0.06] blur-[130px]" />
-        </>
-      ) : (
-        <>
-          <div className="pointer-events-none absolute top-[10%] right-[20%] h-[400px] w-[400px] rounded-full bg-indigo-200/40 blur-[150px]" />
-          <div className="pointer-events-none absolute bottom-[20%] left-[15%] h-[350px] w-[350px] rounded-full bg-blue-200/30 blur-[130px]" />
-        </>
-      )}
+    <div style={{
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      background: 'var(--bg-primary)', position: 'relative', overflow: 'hidden',
+    }}>
+      {/* Ambient glow */}
+      <div style={{
+        position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: 600, height: 400,
+        background: 'radial-gradient(ellipse, rgba(201,165,90,0.05) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }} />
 
-      <div className="absolute top-4 right-4 z-20 sm:top-5 sm:right-6">
-        <ThemeToggle />
+      {/* Theme toggle */}
+      <div style={{ position: 'absolute', top: 'var(--space-5)', right: 'var(--space-5)', zIndex: 10 }}>
+        <button
+          onClick={toggleTheme}
+          style={{
+            width: 36, height: 36, borderRadius: 'var(--radius)',
+            background: 'var(--bg-elevated)', border: '1px solid var(--border-color)',
+            color: 'var(--text-tertiary)', cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          {isDark ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+              <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            </svg>
+          )}
+        </button>
       </div>
 
-      <div className="relative z-10 w-full max-w-[420px] px-4 sm:px-6">
-        <div className="mb-8 flex flex-col items-center">
-          <img src={logo} alt="HA-RAG" className="mb-4 h-16 w-16 object-contain" />
-          <h1 className={`text-2xl font-bold tracking-tight ${t.text}`}>Create your account</h1>
-          <p className={`mt-1.5 text-sm ${t.textMuted}`}>Start chatting with your documents</p>
-        </div>
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)', position: 'relative', zIndex: 1 }}>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          style={{
+            width: '100%', maxWidth: 420, padding: 'var(--space-10)',
+            background: 'var(--bg-surface)', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-lg)',
+          }}
+        >
+          <div style={{ textAlign: 'center', marginBottom: 'var(--space-6)' }}>
+            <Link to="/" style={{ display: 'block', margin: '0 auto var(--space-4)', width: 44 }}>
+              <img src={logo} alt="HA-RAG" style={{ width: 44, height: 44 }} />
+            </Link>
+            <h1 style={{
+              fontSize: 'var(--text-2xl)', fontWeight: 700, color: 'var(--text-primary)',
+              letterSpacing: '-0.03em', marginBottom: 'var(--space-1)',
+              fontFamily: 'var(--font-serif)',
+            }}>
+              Create an account
+            </h1>
+            <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+              Join the academic intelligence platform
+            </p>
+          </div>
 
-        <div className={`rounded-2xl border ${t.border} ${isDark ? 'bg-white/[0.03]' : 'bg-white'} p-5 sm:p-7 ${t.shadow} backdrop-blur-xl`}>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            <Input label="Full Name" type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+            <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)' }}>
+              <Input label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Input label="Confirm" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required />
+            </div>
+
             {error && (
-              <div className="flex items-center gap-2 rounded-lg border border-red-300/30 bg-red-500/[0.08] px-4 py-2.5 text-sm text-red-400">
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
-                </svg>
+              <div style={{
+                padding: 'var(--space-3)', background: 'var(--danger-subtle)',
+                color: 'var(--danger)', borderRadius: 'var(--radius)',
+                fontSize: 'var(--text-sm)', textAlign: 'center', fontWeight: 500,
+              }}>
                 {error}
               </div>
             )}
 
-            <div>
-              <label htmlFor="reg-name" className={`mb-1.5 block text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>Full Name</label>
-              <input id="reg-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="John Doe" required
-                className={`h-11 w-full rounded-lg border ${t.border} ${t.bgInput} px-4 text-sm ${t.text} outline-none transition-all ${isDark ? 'focus:bg-white/[0.06] focus:border-violet-500/30 placeholder:text-white/20' : 'focus:bg-white focus:border-indigo-400 placeholder:text-slate-300'}`}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="reg-email" className={`mb-1.5 block text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>Email</label>
-              <input id="reg-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required
-                className={`h-11 w-full rounded-lg border ${t.border} ${t.bgInput} px-4 text-sm ${t.text} outline-none transition-all ${isDark ? 'focus:bg-white/[0.06] focus:border-violet-500/30 placeholder:text-white/20' : 'focus:bg-white focus:border-indigo-400 placeholder:text-slate-300'}`}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="reg-pass" className={`mb-1.5 block text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>Password</label>
-                <input id="reg-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required minLength={6}
-                  className={`h-11 w-full rounded-lg border ${t.border} ${t.bgInput} px-4 text-sm ${t.text} outline-none transition-all ${isDark ? 'focus:bg-white/[0.06] focus:border-violet-500/30 placeholder:text-white/20' : 'focus:bg-white focus:border-indigo-400 placeholder:text-slate-300'}`}
-                />
-              </div>
-              <div>
-                <label htmlFor="reg-confirm" className={`mb-1.5 block text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>Confirm</label>
-                <input id="reg-confirm" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" required
-                  className={`h-11 w-full rounded-lg border ${t.border} ${t.bgInput} px-4 text-sm ${t.text} outline-none transition-all ${isDark ? 'focus:bg-white/[0.06] focus:border-violet-500/30 placeholder:text-white/20' : 'focus:bg-white focus:border-indigo-400 placeholder:text-slate-300'}`}
-                />
-              </div>
-            </div>
-
-            <button type="submit" disabled={isLoading}
-              className={`flex h-11 w-full items-center justify-center rounded-lg bg-gradient-to-r ${t.gradient} text-sm font-semibold text-white shadow-md transition-all hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50`}
-            >
-              {isLoading ? (
-                <span className="flex items-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                  Creating account...
-                </span>
-              ) : 'Create Account'}
-            </button>
+            <Button type="submit" disabled={loading} style={{ width: '100%', marginTop: 'var(--space-2)' }}>
+              {loading ? 'Creating account...' : 'Sign Up'}
+            </Button>
           </form>
 
-          <div className="my-5 flex items-center gap-4">
-            <div className={`h-px flex-1 ${isDark ? 'bg-white/[0.06]' : 'bg-slate-200'}`} />
-            <span className={`text-[11px] font-medium uppercase tracking-wider ${t.textFaint}`}>or</span>
-            <div className={`h-px flex-1 ${isDark ? 'bg-white/[0.06]' : 'bg-slate-200'}`} />
+          <div style={{ display: 'flex', alignItems: 'center', margin: 'var(--space-6) 0', gap: 'var(--space-3)' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>or</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--border-color)' }} />
           </div>
 
-          <button onClick={handleDemo} disabled={isDemoLoading}
-            className={`flex h-11 w-full items-center justify-center gap-2 rounded-lg border-2 text-sm font-semibold transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50
-              ${isDark ? 'border-emerald-500/25 text-emerald-400 hover:border-emerald-400/40 hover:bg-emerald-500/[0.06]' : 'border-emerald-400/40 text-emerald-600 hover:border-emerald-500 hover:bg-emerald-50'}`}
-          >
-            {isDemoLoading ? (
-              <span className="flex items-center gap-2">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-400/30 border-t-emerald-400" />
-                Setting up demo...
-              </span>
-            ) : (
-              <>
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
-                Try Demo — No Sign Up Required
-              </>
-            )}
-          </button>
-          <p className={`mt-2.5 text-center text-[11px] ${t.textFaint}`}>For recruiters and evaluators</p>
-        </div>
+          <Button variant="secondary" onClick={handleDemoLogin} disabled={loading} style={{ width: '100%' }}>
+            Try Demo — No Sign Up Required
+          </Button>
 
-        <p className={`mt-6 text-center text-sm ${t.textMuted}`}>
-          Already have an account?{' '}
-          <Link to="/login" className={`font-semibold ${t.accent} transition-opacity hover:opacity-80`}>Sign in</Link>
-        </p>
-      </div>
+          <p style={{
+            textAlign: 'center', marginTop: 'var(--space-6)',
+            fontSize: 'var(--text-sm)', color: 'var(--text-secondary)',
+          }}>
+            Already have an account?{' '}
+            <Link to="/login" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>
+              Sign in
+            </Link>
+          </p>
+        </motion.div>
+      </main>
     </div>
   );
-};
-
-export default RegisterPage;
+}
