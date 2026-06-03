@@ -1,4 +1,6 @@
-export default function SidebarSection({ label, action, children, className = '' }) {
+import { memo } from 'react';
+
+const SidebarSection = memo(function SidebarSection({ label, action, children, className = '' }) {
   return (
     <div className={className} style={{ padding: '0 var(--space-2)' }}>
       <div
@@ -21,4 +23,6 @@ export default function SidebarSection({ label, action, children, className = ''
       </div>
     </div>
   );
-}
+});
+
+export default SidebarSection;

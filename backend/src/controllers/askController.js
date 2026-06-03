@@ -137,7 +137,45 @@ const resolveQuestionScope = async ({ userId, workspaceId, documentId, documentI
  * Fallback message used when retrieval returns no relevant chunks
  * or the query is unsupported.
  */
-const NO_RELEVANT_INFO = "No relevant information was found in the uploaded documents. Please try rephrasing your question or upload documents that cover this topic.";
+const NO_RELEVANT_INFO = "I couldn't find relevant information about this topic in the uploaded documents. The documents may not cover this subject, or you could try rephrasing your question.";
+
+/**
+ * Get a user-friendly error message from an error object.
+ */
+const getUserFriendlyError = (error) => {
+    if (error.status) return error.message;
+
+    const msg = error.message || "";
+    const code = error.code || "";
+
+    // Network / timeout errors
+    if (code === "ECONNRESET" || code === "ETIMEDOUT" || code === "ECONNABORTED") {
+        return "The AI service is temporarily unavailable. Please try again in a moment.";
+    }
+
+    // OpenAI rate limit
+    if (msg.includes("429") || msg.includes("rate limit") || msg.includes("Rate limit")) {
+        return "The AI service is currently busy. Please wait a few seconds and try again.";
+    }
+
+    // OpenAI context length
+    if (msg.includes("context_length") || msg.includes("maximum context")) {
+        return "Your question combined with the document context is too long. Try asking about a more specific topic.";
+    }
+
+    // OpenAI API key issues
+    if (msg.includes("401") || msg.includes("Incorrect API key") || msg.includes("invalid_api_key")) {
+        return "There's a configuration issue with the AI service. Please contact the administrator.";
+    }
+
+    // Pinecone errors
+    if (msg.includes("Pinecone") || msg.includes("pinecone") || msg.includes("vector")) {
+        return "The document search service encountered an error. Please try again.";
+    }
+
+    // Generic but still informative
+    return `Something went wrong while generating the answer. Please try again. (${msg.substring(0, 80)})`;
+};
 
 export const askQuestion = async (req, res) => {
     let stream = null;
@@ -196,35 +234,6 @@ export const askQuestion = async (req, res) => {
         timings.classifyMs = Date.now() - classifyStart;
         console.log(`[ASK] Classification: ${JSON.stringify(classification)} (${timings.classifyMs}ms)`);
 
-        // Handle DB queries
-        if (classification.type === "db") {
-            const scope = await resolveQuestionScope({ userId, workspaceId, documentId, documentIds, existingChat });
-            const activeDocumentIds = scope.targetDocs.map(doc => doc._id.toString());
-
-            if (!targetChatId) {
-                const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
-                const newChat = await Chat.create({
-                    title: title || "New Chat",
-                    documentId: scope.targetDocumentId,
-                    workspaceId: scope.workspaceId,
-                    activeDocumentIds,
-                    userId
-                });
-                targetChatId = newChat._id;
-            }
-
-            // Fire-and-forget user message
-            persistInBackground(() => Message.create({ chatId: targetChatId, role: "user", content: question }));
-
-            res.setHeader("X-Chat-Id", targetChatId.toString());
-            stream = createSseStream(req, res);
-            stream.send("meta", { chatId: targetChatId.toString(), workspaceId: scope.workspaceId, documentIds: activeDocumentIds });
-
-            await streamStaticAnswer(stream, targetChatId, "This will be fetched from database", []);
-            logTimings(timings, requestStart);
-            return;
-        }
-
         // ── 2. Resolve document scope ────────────────────────────────────
         const scopeStart = Date.now();
         const scope = await resolveQuestionScope({
@@ -242,7 +251,7 @@ export const askQuestion = async (req, res) => {
 
         // ── 3. Create/update chat ────────────────────────────────────────
         if (!targetChatId) {
-            const title = question.substring(0, 40) + (question.length > 40 ? "..." : "");
+            const title = question.length > 60 ? question.substring(0, 57) + "..." : question.substring(0, 60);
             const newChat = await Chat.create({
                 title: title || "New Chat",
                 documentId: scope.targetDocumentId,
@@ -280,7 +289,7 @@ export const askQuestion = async (req, res) => {
         req.on("close", () => abortController.abort());
 
         if (retrievalTargets.length === 0) {
-            await streamStaticAnswer(stream, targetChatId, "No active documents found in this workspace.", []);
+            await streamStaticAnswer(stream, targetChatId, "No active documents found. Please select a document or add documents to this workspace.", []);
             logTimings(timings, requestStart);
             return;
         }
@@ -304,18 +313,35 @@ export const askQuestion = async (req, res) => {
         stream.send("status", { stage: "retrieving" });
         const retrievalStart = Date.now();
 
-        const chunks = await retrieveRelevantChunks(question, retrievalTargets, {
-            topK: classification.topK,
-            queryType: classification.type,
-            timings
-        });
+        let chunks;
+        try {
+            chunks = await retrieveRelevantChunks(question, retrievalTargets, {
+                topK: classification.topK,
+                queryType: classification.type,
+                timings
+            });
+        } catch (retrievalError) {
+            console.error("[ASK] Retrieval failed:", retrievalError.message);
+            // Don't bail out completely — try to give a helpful response
+            chunks = [];
+        }
 
         timings.totalRetrievalMs = Date.now() - retrievalStart;
         console.log(`[ASK] Retrieval complete: ${chunks?.length || 0} chunks in ${timings.totalRetrievalMs}ms`);
 
-        // ── 7. Handle no-results / unsupported queries ───────────────────
+        // ── 7. Handle no-results ─────────────────────────────────────────
         if (!chunks || chunks.length === 0) {
-            await streamStaticAnswer(stream, targetChatId, NO_RELEVANT_INFO, []);
+            // For "unsupported" queries, give a clear off-topic message
+            if (classification.type === "unsupported") {
+                await streamStaticAnswer(
+                    stream,
+                    targetChatId,
+                    "This question doesn't seem related to the uploaded documents. I can only answer questions based on the content of your uploaded research documents.",
+                    []
+                );
+            } else {
+                await streamStaticAnswer(stream, targetChatId, NO_RELEVANT_INFO, []);
+            }
             logTimings(timings, requestStart);
             return;
         }
@@ -354,13 +380,29 @@ export const askQuestion = async (req, res) => {
                 question,
                 chunks,
                 chatHistory,
-                (token) => stream.send("token", { text: token }),
+                (token) => {
+                    if (!stream.isClosed()) {
+                        stream.send("token", { text: token });
+                    }
+                },
                 { signal: abortController.signal, timings }
             );
             console.log("[ASK] Streaming finished");
         } catch (err) {
             if (abortController.signal.aborted || stream.isClosed()) {
                 console.log("[ASK] Client disconnected during streaming");
+                logTimings(timings, requestStart);
+                return;
+            }
+
+            // If we already streamed some content, append error notice
+            if (fullAnswer) {
+                console.error("[ASK] Streaming error after partial response:", err.message);
+                stream.send("token", { text: "\n\n*(Response was interrupted due to an error)*" });
+                stream.send("sources", { sources, verification: null });
+                stream.send("done", { answer: fullAnswer + "\n\n*(Response was interrupted due to an error)*" });
+                stream.close();
+                persistAssistantMessage(targetChatId, fullAnswer, sources);
                 logTimings(timings, requestStart);
                 return;
             }
@@ -375,17 +417,22 @@ export const askQuestion = async (req, res) => {
         }
 
         if (!fullAnswer) {
-            fullAnswer = "I couldn't generate a response.";
+            fullAnswer = "I couldn't generate a response based on the available context. Please try rephrasing your question.";
             stream.send("token", { text: fullAnswer });
         }
 
         // ── 11. Verification (optional) ──────────────────────────────────
         if (mode === "verified" && fullAnswer) {
-            stream.send("status", { stage: "verifying" });
-            const verifyStart = Date.now();
-            verification = await verifyAnswer(question, fullAnswer, chunks);
-            timings.verificationMs = Date.now() - verifyStart;
-            console.log(`[ASK] Verification: ${verification.confidence} (${timings.verificationMs}ms)`);
+            try {
+                stream.send("status", { stage: "verifying" });
+                const verifyStart = Date.now();
+                verification = await verifyAnswer(question, fullAnswer, chunks);
+                timings.verificationMs = Date.now() - verifyStart;
+                console.log(`[ASK] Verification: ${verification.confidence} (${timings.verificationMs}ms)`);
+            } catch (verifyErr) {
+                console.error("[ASK] Verification failed (non-critical):", verifyErr.message);
+                // Verification is optional — don't fail the whole request
+            }
         }
 
         // ── 12. Send sources and finalize ────────────────────────────────
@@ -404,12 +451,14 @@ export const askQuestion = async (req, res) => {
         console.error("ASK ERROR:", error);
 
         if (stream && !stream.isClosed()) {
-            streamError(stream, error.status ? error.message : "Streaming failed");
+            streamError(stream, getUserFriendlyError(error));
             return;
         }
 
         if (!res.headersSent) {
-            return res.status(error.status || 500).json({ error: error.status ? error.message : "Streaming failed" });
+            return res.status(error.status || 500).json({
+                error: getUserFriendlyError(error)
+            });
         }
 
         if (!res.writableEnded) {

@@ -1,4 +1,6 @@
+import { useState, useMemo, memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import useLogo from '../../hooks/useLogo';
@@ -67,7 +69,36 @@ const icons = {
   ),
 };
 
-export default function Sidebar({
+// Animation variants for list items
+const itemVariants = {
+  initial: { opacity: 0, x: -8, height: 0 },
+  animate: { opacity: 1, x: 0, height: 'auto', transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } },
+  exit: { opacity: 0, x: -8, height: 0, transition: { duration: 0.15, ease: 'easeIn' } },
+};
+
+// Inline confirmation popover for delete
+function DeleteConfirm({ itemName, onConfirm, onCancel }) {
+  return (
+    <motion.div
+      className="confirm-delete"
+      initial={{ opacity: 0, y: -4, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -4, scale: 0.95 }}
+      transition={{ duration: 0.12 }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="confirm-delete__text">
+        Delete <strong>{itemName}</strong>? This will remove all associated chats.
+      </div>
+      <div className="confirm-delete__actions">
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onConfirm}>Delete</Button>
+      </div>
+    </motion.div>
+  );
+}
+
+const Sidebar = memo(function Sidebar({
   isOpen,
   onToggle,
   documents = [],
@@ -93,10 +124,40 @@ export default function Sidebar({
   const { isDark, toggleTheme } = useTheme();
   const logo = useLogo();
 
-  // Docs in the current workspace (by ID)
-  const wsDocIds = new Set(workspaceDocuments.map(d => d._id));
-  // Docs NOT in the workspace yet
-  const availableToAdd = documents.filter(d => !wsDocIds.has(d._id));
+  // Delete confirmation state
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [confirmDeleteType, setConfirmDeleteType] = useState(null); // 'workspace' | 'chat'
+
+  // Memoize computed sets to prevent recalculation on every render
+  const wsDocIds = useMemo(() => new Set(workspaceDocuments.map(d => d._id)), [workspaceDocuments]);
+  const availableToAdd = useMemo(() => documents.filter(d => !wsDocIds.has(d._id)), [documents, wsDocIds]);
+
+  const handleWorkspaceDelete = useCallback((wsId) => {
+    setConfirmDeleteId(wsId);
+    setConfirmDeleteType('workspace');
+  }, []);
+
+  const handleChatDelete = useCallback((chatId) => {
+    onDeleteChat(chatId);
+  }, [onDeleteChat]);
+
+  const confirmDelete = useCallback(() => {
+    if (confirmDeleteType === 'workspace' && confirmDeleteId) {
+      onDeleteWorkspace(confirmDeleteId);
+    }
+    setConfirmDeleteId(null);
+    setConfirmDeleteType(null);
+  }, [confirmDeleteId, confirmDeleteType, onDeleteWorkspace]);
+
+  const cancelDelete = useCallback(() => {
+    setConfirmDeleteId(null);
+    setConfirmDeleteType(null);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    logout();
+    navigate('/');
+  }, [logout, navigate]);
 
   return (
     <>
@@ -171,22 +232,34 @@ export default function Sidebar({
               </IconButton>
             }
           >
-            {workspaces.length > 0 ? (
-              workspaces.map(ws => (
-                <SidebarItem
-                  key={ws._id}
-                  icon={icons.workspace}
-                  label={ws.name}
-                  active={selectedWorkspaceId === ws._id}
-                  onClick={() => onSelectWorkspace(ws)}
-                  onDelete={() => onDeleteWorkspace(ws._id)}
-                />
-              ))
-            ) : (
-              <div style={{ padding: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
-                No workspaces yet
-              </div>
-            )}
+            <AnimatePresence mode="popLayout">
+              {workspaces.length > 0 ? (
+                workspaces.map(ws => (
+                  <motion.div key={ws._id} variants={itemVariants} initial="initial" animate="animate" exit="exit" layout style={{ position: 'relative' }}>
+                    <SidebarItem
+                      icon={icons.workspace}
+                      label={ws.name}
+                      active={selectedWorkspaceId === ws._id}
+                      onClick={() => onSelectWorkspace(ws)}
+                      onDelete={() => handleWorkspaceDelete(ws._id)}
+                    />
+                    <AnimatePresence>
+                      {confirmDeleteId === ws._id && confirmDeleteType === 'workspace' && (
+                        <DeleteConfirm
+                          itemName={ws.name}
+                          onConfirm={confirmDelete}
+                          onCancel={cancelDelete}
+                        />
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                ))
+              ) : (
+                <div style={{ padding: 'var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+                  No workspaces yet
+                </div>
+              )}
+            </AnimatePresence>
           </SidebarSection>
 
           <div style={{ margin: 'var(--space-3) var(--space-5)', height: 1, background: 'var(--border-color)' }} />
@@ -242,6 +315,7 @@ export default function Sidebar({
                                 color: inWorkspace ? 'var(--accent)' : 'var(--text-tertiary)',
                                 border: inWorkspace ? 'none' : '1px solid var(--border-color)',
                                 fontSize: 10,
+                                transition: 'all 150ms ease',
                               }}>
                                 {inWorkspace ? icons.check : null}
                               </span>
@@ -273,22 +347,25 @@ export default function Sidebar({
               ) : null
             }
           >
-            {chats.length > 0 ? (
-              chats.map(chat => (
-                <SidebarItem
-                  key={chat._id}
-                  icon={icons.chat}
-                  label={chat.title}
-                  active={selectedChatId === chat._id}
-                  onClick={() => onSelectChat(chat)}
-                  onDelete={() => onDeleteChat(chat._id)}
-                />
-              ))
-            ) : (
-              <div style={{ padding: 'var(--space-6) var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
-                No conversations yet
-              </div>
-            )}
+            <AnimatePresence mode="popLayout">
+              {chats.length > 0 ? (
+                chats.map(chat => (
+                  <motion.div key={chat._id} variants={itemVariants} initial="initial" animate="animate" exit="exit" layout>
+                    <SidebarItem
+                      icon={icons.chat}
+                      label={chat.title}
+                      active={selectedChatId === chat._id}
+                      onClick={() => onSelectChat(chat)}
+                      onDelete={() => handleChatDelete(chat._id)}
+                    />
+                  </motion.div>
+                ))
+              ) : (
+                <div style={{ padding: 'var(--space-6) var(--space-3)', fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+                  No conversations yet
+                </div>
+              )}
+            </AnimatePresence>
           </SidebarSection>
         </div>
 
@@ -302,7 +379,7 @@ export default function Sidebar({
             {isDark ? icons.sun : icons.moon}
           </IconButton>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', fontWeight: 500 }}>v2.0</div>
-          <IconButton size="md" variant="danger" title="Log out" onClick={() => { logout(); navigate('/'); }}>
+          <IconButton size="md" variant="danger" title="Log out" onClick={handleLogout}>
             {icons.logout}
           </IconButton>
         </div>
@@ -318,4 +395,6 @@ export default function Sidebar({
       `}</style>
     </>
   );
-}
+});
+
+export default Sidebar;

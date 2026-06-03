@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 const chatSchema = new mongoose.Schema({
-    title: { type: String, required: true, maxlength: 40 },
+    title: { type: String, required: true, maxlength: 80 },
     documentId: { type: String, default: null },
     workspaceId: { type: String, default: null },
     activeDocumentIds: [{ type: String }],

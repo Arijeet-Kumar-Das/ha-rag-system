@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import useChatWorkspace from '../hooks/useChatWorkspace';
 import Sidebar from '../components/sidebar/Sidebar';
 import ChatMessage from '../components/ChatMessage';
@@ -9,6 +10,35 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 
+// ── Memoized workspace document pill ──
+const DocPill = memo(function DocPill({ doc, isActive, onToggle }) {
+  return (
+    <motion.button
+      layout
+      onClick={() => onToggle(doc._id)}
+      className={`ws-doc-pill ${isActive ? 'ws-doc-pill--active' : ''}`}
+      whileTap={{ scale: 0.96 }}
+      transition={{ layout: { duration: 0.2 } }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        {isActive ? <polyline points="20 6 9 17 4 12" /> : <circle cx="12" cy="12" r="10" />}
+      </svg>
+      {doc.fileName}
+    </motion.button>
+  );
+});
+
+// ── Custom checkbox for modal ──
+function CustomCheckbox({ checked }) {
+  return (
+    <span className={`custom-checkbox ${checked ? 'custom-checkbox--checked' : ''}`}>
+      <svg className="custom-checkbox__check" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </span>
+  );
+}
+
 export default function ChatPage() {
   const { docId } = useParams();
   const navigate = useNavigate();
@@ -16,6 +46,7 @@ export default function ChatPage() {
   const [showWsModal, setShowWsModal] = useState(false);
   const [wsName, setWsName] = useState('');
   const [wsDocIds, setWsDocIds] = useState([]);
+  const [docSearch, setDocSearch] = useState('');
 
   const hook = useChatWorkspace(docId, navigate);
   const {
@@ -28,13 +59,62 @@ export default function ChatPage() {
     setInput, setMode,
     handleSubmit, handleFileUpload, handleDeleteChat,
     handleSelectDocument, handleSelectWorkspace, handleSelectChat,
-    handleCreateWorkspace, handleDeleteWorkspace,
+    handleCreateWorkspace, handleDeleteWorkspace, handleNewChat,
     toggleActiveDocument,
     handleAddDocumentToWorkspace, handleRemoveDocumentFromWorkspace,
   } = hook;
 
+  // Memoize the active doc IDs as a Set for O(1) lookups in pills
+  const activeDocIdSet = useMemo(() => new Set(activeDocumentIds), [activeDocumentIds]);
+
+  // Filtered documents for the modal search
+  const filteredModalDocs = useMemo(() => {
+    if (!docSearch.trim()) return documents;
+    const q = docSearch.toLowerCase();
+    return documents.filter(d => d.fileName.toLowerCase().includes(q));
+  }, [documents, docSearch]);
+
+  // Selected doc IDs as a Set for the modal
+  const wsDocIdSet = useMemo(() => new Set(wsDocIds), [wsDocIds]);
+
+  const toggleModalDoc = useCallback((docId) => {
+    setWsDocIds(prev =>
+      prev.includes(docId)
+        ? prev.filter(id => id !== docId)
+        : [...prev, docId]
+    );
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    const allFilteredIds = filteredModalDocs.map(d => d._id);
+    const allSelected = allFilteredIds.every(id => wsDocIdSet.has(id));
+    if (allSelected) {
+      // Deselect all filtered
+      setWsDocIds(prev => prev.filter(id => !allFilteredIds.includes(id)));
+    } else {
+      // Select all filtered
+      setWsDocIds(prev => [...new Set([...prev, ...allFilteredIds])]);
+    }
+  }, [filteredModalDocs, wsDocIdSet]);
+
+  const openWorkspaceModal = useCallback(() => {
+    setWsName('');
+    setWsDocIds([]);
+    setDocSearch('');
+    setShowWsModal(true);
+  }, []);
+
+  const closeWorkspaceModal = useCallback(() => {
+    setShowWsModal(false);
+  }, []);
+
+  const handleCreateAndClose = useCallback(() => {
+    handleCreateWorkspace(wsName, wsDocIds);
+    setShowWsModal(false);
+  }, [handleCreateWorkspace, wsName, wsDocIds]);
+
   // Build sidebar props — map hook handler names to what Sidebar expects
-  const sidebarProps = {
+  const sidebarProps = useMemo(() => ({
     documents,
     workspaces,
     chats,
@@ -45,20 +125,18 @@ export default function ChatPage() {
     onSelectDocument: handleSelectDocument,
     onSelectWorkspace: handleSelectWorkspace,
     onSelectChat: handleSelectChat,
-    onNewChat: () => {
-      navigate('/chat');
-      window.location.reload();
-    },
+    onNewChat: handleNewChat,
     onDeleteChat: handleDeleteChat,
     onDeleteWorkspace: handleDeleteWorkspace,
-    onOpenWorkspaceModal: () => {
-      setWsName('');
-      setWsDocIds([]);
-      setShowWsModal(true);
-    },
+    onOpenWorkspaceModal: openWorkspaceModal,
     onAddDocToWorkspace: handleAddDocumentToWorkspace,
     onRemoveDocFromWorkspace: handleRemoveDocumentFromWorkspace,
-  };
+  }), [
+    documents, workspaces, chats, selectedDocumentId, selectedWorkspaceId, selectedChatId,
+    workspaceDocuments, handleSelectDocument, handleSelectWorkspace, handleSelectChat,
+    handleNewChat, handleDeleteChat, handleDeleteWorkspace, openWorkspaceModal,
+    handleAddDocumentToWorkspace, handleRemoveDocumentFromWorkspace,
+  ]);
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-primary)' }}>
@@ -152,28 +230,16 @@ export default function ChatPage() {
             borderBottom: '1px solid var(--border-color)',
             display: 'flex', gap: 'var(--space-2)', overflowX: 'auto', flexShrink: 0,
           }}>
-            {workspaceDocuments.map(doc => {
-              const isActive = activeDocumentIds.includes(doc._id);
-              return (
-                <button
+            <AnimatePresence mode="popLayout">
+              {workspaceDocuments.map(doc => (
+                <DocPill
                   key={doc._id}
-                  onClick={() => toggleActiveDocument(doc._id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 'var(--space-1)',
-                    padding: '4px 10px', fontSize: 'var(--text-xs)', borderRadius: 'var(--radius)',
-                    border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border-color)'}`,
-                    background: isActive ? 'var(--accent-subtle)' : 'var(--bg-elevated)',
-                    color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                    cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all var(--transition-fast)',
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    {isActive ? <polyline points="20 6 9 17 4 12" /> : <circle cx="12" cy="12" r="10" />}
-                  </svg>
-                  {doc.fileName}
-                </button>
-              );
-            })}
+                  doc={doc}
+                  isActive={activeDocIdSet.has(doc._id)}
+                  onToggle={toggleActiveDocument}
+                />
+              ))}
+            </AnimatePresence>
           </div>
         )}
 
@@ -238,53 +304,126 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Workspace Modal */}
-        <Modal isOpen={showWsModal} onClose={() => setShowWsModal(false)} title="Create Workspace">
+        {/* ═══ Workspace Create Modal — Redesigned ═══ */}
+        <Modal isOpen={showWsModal} onClose={closeWorkspaceModal} title="Create Workspace">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-            <Input label="Workspace Name" placeholder="e.g. Thesis Research" value={wsName} onChange={(e) => setWsName(e.target.value)} autoFocus />
+            <Input
+              label="Workspace Name"
+              placeholder="e.g. Thesis Research"
+              value={wsName}
+              onChange={(e) => setWsName(e.target.value)}
+              autoFocus
+            />
+
             <div>
-              <label style={{
-                fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--text-tertiary)',
-                textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 'var(--space-2)', display: 'block',
-              }}>
-                Include Documents
-              </label>
               <div style={{
-                maxHeight: 200, overflowY: 'auto',
-                border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                marginBottom: 'var(--space-2)',
               }}>
-                {documents.map(doc => (
-                  <label key={doc._id} style={{
-                    display: 'flex', alignItems: 'center', gap: 'var(--space-3)',
-                    padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border-color)',
-                    cursor: 'pointer', fontSize: 'var(--text-sm)',
+                <label style={{
+                  fontSize: 'var(--text-xs)', fontWeight: 500, color: 'var(--text-tertiary)',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                }}>
+                  Include Documents
+                </label>
+                {documents.length > 0 && (
+                  <span style={{
+                    fontSize: 'var(--text-xs)', color: 'var(--accent)', fontWeight: 500,
                   }}>
-                    <input
-                      type="checkbox"
-                      checked={wsDocIds.includes(doc._id)}
-                      onChange={(e) => {
-                        if (e.target.checked) setWsDocIds(p => [...p, doc._id]);
-                        else setWsDocIds(p => p.filter(id => id !== doc._id));
-                      }}
-                      style={{ accentColor: 'var(--accent)' }}
-                    />
-                    <span style={{ color: 'var(--text-primary)' }}>{doc.fileName}</span>
-                  </label>
-                ))}
-                {documents.length === 0 && (
+                    {wsDocIds.length} selected
+                  </span>
+                )}
+              </div>
+
+              {/* Search input */}
+              {documents.length > 3 && (
+                <div className="ws-modal-search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search documents..."
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Select all toggle */}
+              {filteredModalDocs.length > 1 && (
+                <button
+                  onClick={handleSelectAll}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                    padding: 'var(--space-1) 0', marginBottom: 'var(--space-2)',
+                    fontSize: 'var(--text-xs)', color: 'var(--accent)',
+                    cursor: 'pointer', background: 'none', border: 'none',
+                    fontFamily: 'var(--font-sans)', fontWeight: 500,
+                  }}
+                >
+                  {filteredModalDocs.every(d => wsDocIdSet.has(d._id)) ? 'Deselect all' : 'Select all'}
+                </button>
+              )}
+
+              {/* Document list */}
+              <div className="ws-modal-doc-list">
+                {filteredModalDocs.length > 0 ? (
+                  filteredModalDocs.map((doc, idx) => {
+                    const isSelected = wsDocIdSet.has(doc._id);
+                    return (
+                      <motion.div
+                        key={doc._id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.02, duration: 0.15 }}
+                      >
+                        <button
+                          type="button"
+                          className={`ws-modal-doc-item ${isSelected ? 'ws-modal-doc-item--selected' : ''}`}
+                          onClick={() => toggleModalDoc(doc._id)}
+                        >
+                          <CustomCheckbox checked={isSelected} />
+                          <span style={{ color: 'var(--text-primary)', flex: 1, textAlign: 'left' }}>
+                            {doc.fileName}
+                          </span>
+                          {doc.chunkCount && (
+                            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                              {doc.chunkCount} chunks
+                            </span>
+                          )}
+                        </button>
+                      </motion.div>
+                    );
+                  })
+                ) : documents.length === 0 ? (
                   <div style={{ padding: 'var(--space-4)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
                     No documents available. Upload some first.
+                  </div>
+                ) : (
+                  <div style={{ padding: 'var(--space-4)', fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+                    No documents matching "{docSearch}"
                   </div>
                 )}
               </div>
             </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
-              <Button variant="ghost" onClick={() => setShowWsModal(false)}>Cancel</Button>
+              <Button variant="ghost" onClick={closeWorkspaceModal}>Cancel</Button>
               <Button
-                onClick={() => { handleCreateWorkspace(wsName, wsDocIds); setShowWsModal(false); }}
+                onClick={handleCreateAndClose}
                 disabled={!wsName.trim() || wsDocIds.length === 0 || isBusyWorkspace}
               >
-                Create
+                {isBusyWorkspace ? (
+                  <>
+                    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" />
+                    </svg>
+                    Creating...
+                  </>
+                ) : (
+                  `Create${wsDocIds.length > 0 ? ` (${wsDocIds.length})` : ''}`
+                )}
               </Button>
             </div>
           </div>

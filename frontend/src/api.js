@@ -149,6 +149,8 @@ export const askQuestion = async (question, target, chatId, onToken, mode = "sta
   let finalChatId = newChatId;
   let buffer = "";
 
+  let streamError = null;
+
   const handleEvent = (parsed) => {
     if (!parsed) return;
 
@@ -177,8 +179,16 @@ export const askQuestion = async (question, target, chatId, onToken, mode = "sta
       return;
     }
 
+    if (event === "status" || event === "ping") {
+      // Informational events — ignore
+      return;
+    }
+
     if (event === "error") {
-      throw new Error(data.message || "Streaming failed");
+      // Collect the error but don't throw inside the loop —
+      // we need to flush any buffered tokens first
+      streamError = new Error(data.message || "Something went wrong");
+      return;
     }
   };
 
@@ -194,6 +204,9 @@ export const askQuestion = async (question, target, chatId, onToken, mode = "sta
       for (const frame of frames) {
         handleEvent(parseSseFrame(frame));
       }
+
+      // If we got an error event, stop reading
+      if (streamError) break;
     }
 
     buffer += decoder.decode();
@@ -201,8 +214,25 @@ export const askQuestion = async (question, target, chatId, onToken, mode = "sta
     if (buffer.trim()) {
       handleEvent(parseSseFrame(buffer));
     }
+  } catch (readError) {
+    // Network disconnect during streaming — if we already have partial content,
+    // return it instead of crashing
+    if (full) {
+      console.warn("Stream interrupted, returning partial content:", readError.message);
+    } else {
+      streamError = streamError || new Error(
+        readError.message === "Failed to fetch"
+          ? "Connection lost. Please check your network and try again."
+          : readError.message || "Connection interrupted"
+      );
+    }
   } finally {
     batcher.flushNow();
+  }
+
+  // If we collected an error AND have no content, throw it
+  if (streamError && !full) {
+    throw streamError;
   }
 
   return { answer: full, sources, verification, chatId: finalChatId };

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { memo, useCallback } from 'react';
 
-export default function SidebarItem({
+const SidebarItem = memo(function SidebarItem({
   icon,
   label,
   active = false,
@@ -9,76 +9,51 @@ export default function SidebarItem({
   suffix,
   className = '',
 }) {
-  const [hovered, setHovered] = useState(false);
+  const handleDelete = useCallback((e) => {
+    e.stopPropagation();
+    onDelete?.();
+  }, [onDelete]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' || e.key === ' ') onClick?.();
+  }, [onClick]);
+
+  const handleDeleteKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.stopPropagation();
+      onDelete?.();
+    }
+  }, [onDelete]);
 
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick?.(); }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className={`focus-ring ${className}`}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-2)',
-        width: '100%',
-        height: 34,
-        padding: '0 var(--space-3)',
-        borderRadius: 'var(--radius)',
-        cursor: 'pointer',
-        fontSize: 'var(--text-sm)',
-        fontFamily: 'var(--font-sans)',
-        fontWeight: active ? 500 : 400,
-        color: active ? 'var(--text-primary)' : hovered ? 'var(--text-primary)' : 'var(--text-secondary)',
-        background: active ? 'var(--accent-subtle)' : hovered ? 'var(--bg-elevated)' : 'transparent',
-        transition: 'all 120ms ease',
-        position: 'relative',
-        userSelect: 'none',
-      }}
+      onKeyDown={handleKeyDown}
+      className={`sidebar-item focus-ring ${active ? 'sidebar-item--active' : ''} ${className}`}
     >
       {icon && (
-        <span style={{
-          display: 'flex', alignItems: 'center', flexShrink: 0,
-          color: active ? 'var(--accent)' : 'var(--text-tertiary)',
-          width: 16, height: 16,
-        }}>
+        <span className="sidebar-item__icon">
           {icon}
         </span>
       )}
-      <span style={{
-        flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap', minWidth: 0,
-      }}>
+      <span className="sidebar-item__label">
         {label}
       </span>
-      {suffix && !hovered && (
-        <span style={{ flexShrink: 0 }}>{suffix}</span>
+      {suffix && (
+        <span className={`sidebar-item__suffix ${onDelete ? 'sidebar-item__suffix--hideable' : ''}`}>
+          {suffix}
+        </span>
       )}
-      {onDelete && hovered && (
+      {onDelete && (
         <span
           role="button"
           tabIndex={0}
           title="Delete"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onDelete(); } }}
-          style={{
-            position: 'absolute', right: 4,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            width: 24, height: 24, borderRadius: 'var(--radius-sm)',
-            color: 'var(--text-tertiary)', cursor: 'pointer',
-            transition: 'all 100ms ease',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--danger-subtle)';
-            e.currentTarget.style.color = 'var(--danger)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = 'var(--text-tertiary)';
-          }}
+          onClick={handleDelete}
+          onKeyDown={handleDeleteKeyDown}
+          className="sidebar-item__delete"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
@@ -87,4 +62,6 @@ export default function SidebarItem({
       )}
     </div>
   );
-}
+});
+
+export default SidebarItem;

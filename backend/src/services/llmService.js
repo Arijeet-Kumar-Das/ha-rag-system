@@ -8,6 +8,16 @@ const getClient = () => {
   return client;
 };
 
+// ── Constants ──────────────────────────────────────────────────────────
+const MODEL = "gpt-4o-mini";
+const TEMPERATURE = 0.2;
+const MAX_TOKENS = 2048;          // Increased from 1024 for multi-doc workspace answers
+const MAX_CONTEXT_WORDS = 1200;   // Increased from 800 for better coverage in workspace mode
+const MAX_HISTORY_WORDS = 500;
+const MAX_PER_MESSAGE_WORDS = 200;
+const REQUEST_TIMEOUT_MS = 45000; // 45-second timeout for OpenAI requests
+const MAX_RETRIES = 1;            // Single retry for transient errors
+
 const buildMessages = (question, chunks, chatHistory = []) => {
   if (!chunks || chunks.length === 0) {
     return null;
@@ -33,15 +43,14 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     });
   }
 
-  // 3. Limit total context size — reduced for faster TTFT
+  // 3. Limit total context size
   let joinedContext = "";
   let currentWordCount = 0;
-  const MAX_WORDS = 800;
 
   for (const text of sortedContexts) {
     const words = text.split(/\s+/);
-    if (currentWordCount + words.length > MAX_WORDS) {
-      const remaining = MAX_WORDS - currentWordCount;
+    if (currentWordCount + words.length > MAX_CONTEXT_WORDS) {
+      const remaining = MAX_CONTEXT_WORDS - currentWordCount;
       if (remaining > 0) {
         joinedContext +=
           (joinedContext ? "\n---\n" : "") +
@@ -54,8 +63,6 @@ const buildMessages = (question, chunks, chatHistory = []) => {
   }
 
   // 4. Prepend chatHistory (limit to last 3 messages, trim each)
-  const MAX_HISTORY_WORDS = 500;
-  const MAX_PER_MESSAGE_WORDS = 200;
   let historyWordCount = 0;
 
   const trimmedHistory = chatHistory.slice(-3);
@@ -86,11 +93,24 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     `[LLM] Context: ~${currentWordCount} words from ${chunks.length} chunks`,
   );
 
+  // Count unique document sources for multi-doc awareness
+  const uniqueFiles = new Set(chunks.map(c => c.fileName).filter(Boolean));
+  const multiDocNote = uniqueFiles.size > 1
+    ? `\nYou have context from ${uniqueFiles.size} documents: ${[...uniqueFiles].join(", ")}. Reference specific document names when citing information.`
+    : "";
+
   return [
     {
       role: "system",
       content:
-        "You are an academic assistant. Answer using the provided context.\nCite document names when making document-specific claims.\nIf context doesn't contain the answer, say so clearly.\nDo NOT hallucinate beyond context.",
+        `You are an academic research assistant. Answer the user's question thoroughly using ONLY the provided context.${multiDocNote}
+
+Guidelines:
+- Cite document names when making document-specific claims.
+- If the context contains relevant information, provide a comprehensive answer.
+- If the context does NOT contain the answer, say so clearly — do NOT make up information.
+- For multi-part questions, address each part systematically.
+- Use markdown formatting (headers, lists, bold) for readability.`
     },
     ...historyMessages,
     {
@@ -99,6 +119,34 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     },
   ];
 };
+
+/**
+ * Check if an error is retryable (transient network/rate issues).
+ */
+const isRetryableError = (err) => {
+  const msg = (err.message || "").toLowerCase();
+  const code = err.code || "";
+  const status = err.status || err.statusCode || 0;
+
+  // Network errors
+  if (["ECONNRESET", "ETIMEDOUT", "ECONNABORTED", "EPIPE", "EAI_AGAIN"].includes(code)) return true;
+
+  // Rate limit
+  if (status === 429) return true;
+
+  // Server errors (500, 502, 503)
+  if (status >= 500 && status < 600) return true;
+
+  // OpenAI-specific transient errors
+  if (msg.includes("rate limit") || msg.includes("overloaded") || msg.includes("capacity")) return true;
+
+  return false;
+};
+
+/**
+ * Wait for a specified duration (used between retries).
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const generateAnswer = async (question, chunks) => {
   console.log(`[LLM] Retrieved chunks count: ${chunks?.length || 0}`);
@@ -115,8 +163,9 @@ export const generateAnswer = async (question, chunks) => {
 
   console.time("LLM Response Time");
   const response = await getClient().chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature: 0.2,
+    model: MODEL,
+    temperature: TEMPERATURE,
+    max_tokens: MAX_TOKENS,
     messages,
   });
   console.timeEnd("LLM Response Time");
@@ -151,52 +200,100 @@ export const streamAnswer = async (
 
   let fullAnswer = "";
   let firstTokenReceived = false;
+  let lastError = null;
 
-  const requestStart = Date.now();
-  console.log(
-    `[LLM Stream] OpenAI request start: ${new Date(requestStart).toISOString()}`,
-  );
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[LLM Stream] Retry attempt ${attempt}/${MAX_RETRIES} after error: ${lastError?.message}`);
+      await sleep(1000 * attempt); // Exponential-ish backoff: 1s, 2s
+    }
 
-  try {
-    const requestOptions = options.signal
-      ? { signal: options.signal }
-      : undefined;
-    const stream = await getClient().chat.completions.create(
-      {
-        model: "gpt-4o-mini",
-        temperature: 0.2,
-        max_tokens: 1024,
-        stream: true,
-        messages,
-      },
-      requestOptions,
+    const requestStart = Date.now();
+    console.log(
+      `[LLM Stream] OpenAI request start (attempt ${attempt + 1}): ${new Date(requestStart).toISOString()}`,
     );
 
-    for await (const chunk of stream) {
-      if (options.signal?.aborted) break;
+    // Reset state for retry
+    fullAnswer = "";
+    firstTokenReceived = false;
 
-      const token = chunk.choices?.[0]?.delta?.content;
-      if (token) {
-        if (!firstTokenReceived) {
-          firstTokenReceived = true;
-          const ttft = Date.now() - requestStart;
-          console.log(`[LLM Stream] ⚡ TTFT (Time To First Token): ${ttft}ms`);
-          // Report TTFT through timings if provided
-          if (options.timings) {
-            options.timings.ttftMs = ttft;
-          }
-        }
-        onToken(token);
-        fullAnswer += token;
+    try {
+      // Build request options with timeout
+      const requestOptions = {};
+      if (options.signal) {
+        requestOptions.signal = options.signal;
       }
-    }
-  } finally {
-    const totalStreamTime = Date.now() - requestStart;
-    console.log(`[LLM Stream] Total stream time: ${totalStreamTime}ms`);
-    if (options.timings) {
-      options.timings.llmTotalMs = totalStreamTime;
+      requestOptions.timeout = REQUEST_TIMEOUT_MS;
+
+      const stream = await getClient().chat.completions.create(
+        {
+          model: MODEL,
+          temperature: TEMPERATURE,
+          max_tokens: MAX_TOKENS,
+          stream: true,
+          messages,
+        },
+        requestOptions,
+      );
+
+      for await (const chunk of stream) {
+        if (options.signal?.aborted) break;
+
+        const token = chunk.choices?.[0]?.delta?.content;
+        if (token) {
+          if (!firstTokenReceived) {
+            firstTokenReceived = true;
+            const ttft = Date.now() - requestStart;
+            console.log(`[LLM Stream] ⚡ TTFT (Time To First Token): ${ttft}ms`);
+            // Report TTFT through timings if provided
+            if (options.timings) {
+              options.timings.ttftMs = ttft;
+            }
+          }
+          onToken(token);
+          fullAnswer += token;
+        }
+      }
+
+      // Success — break out of retry loop
+      const totalStreamTime = Date.now() - requestStart;
+      console.log(`[LLM Stream] Total stream time: ${totalStreamTime}ms`);
+      if (options.timings) {
+        options.timings.llmTotalMs = totalStreamTime;
+      }
+
+      return fullAnswer.trim();
+
+    } catch (err) {
+      lastError = err;
+
+      const totalStreamTime = Date.now() - requestStart;
+      console.error(`[LLM Stream] Error after ${totalStreamTime}ms (attempt ${attempt + 1}):`, err.message);
+      if (options.timings) {
+        options.timings.llmTotalMs = totalStreamTime;
+      }
+
+      // If client disconnected, don't retry
+      if (options.signal?.aborted) {
+        throw err;
+      }
+
+      // If we already sent tokens to the client, we can't retry (would duplicate content)
+      if (firstTokenReceived) {
+        console.log("[LLM Stream] Cannot retry — tokens already sent to client");
+        throw err;
+      }
+
+      // Check if the error is retryable
+      if (!isRetryableError(err) || attempt >= MAX_RETRIES) {
+        throw err;
+      }
+
+      console.log(`[LLM Stream] Retryable error detected, will retry...`);
     }
   }
 
+  // Should not reach here, but just in case
+  if (lastError) throw lastError;
   return fullAnswer.trim();
 };

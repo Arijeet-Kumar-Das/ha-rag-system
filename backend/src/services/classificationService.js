@@ -5,21 +5,11 @@
  *   - "factual"     → short, specific answers (topK 3-4)
  *   - "conceptual"  → explanations, theory (topK 5-6)
  *   - "analytical"  → cross-document, comparison (topK 8-10)
- *   - "db"          → structured data (fees, dates, schedules)
  *   - "unsupported" → nonsense, off-topic, hallucination-bait
  * 
- * Replaces the previous LLM-based classifier to eliminate ~1-2s latency.
+ * Note: "db" type was removed — all document-based questions now route
+ * through the RAG pipeline which handles them correctly.
  */
-
-const DB_PATTERNS = [
-    /\b(fee|fees|tuition|cost|price|payment)\b/i,
-    /\b(deadline|due date|last date|registration date)\b/i,
-    /\b(schedule|timetable|exam date|class timing)\b/i,
-    /\b(course list|syllabus|curriculum|credit)\b/i,
-    /\b(admission|enrollment|eligibility)\b/i,
-    /\b(contact|phone|email|address|office)\b/i,
-    /\b(hostel|mess|cafeteria|library hours)\b/i,
-];
 
 const ANALYTICAL_PATTERNS = [
     /\b(compare|comparison|contrast|differ|difference|vs\.?|versus)\b/i,
@@ -38,11 +28,14 @@ const FACTUAL_PATTERNS = [
     /\b(port|protocol|version|number|year|date|founder|inventor)\b/i,
 ];
 
+/**
+ * Patterns for queries that are clearly off-topic for a document-based research assistant.
+ * These must be very specific to avoid false positives on legitimate academic queries.
+ */
 const UNSUPPORTED_INDICATORS = [
-    /\b(quantum scrum|agile blockchain|neural waterfall)\b/i,
-    /\b(recipe|cook|weather|movie|song|joke|story)\b/i,
-    /\b(play|game|sport score|stock price|crypto)\b/i,
-    /\b(translate|translation)\b/i,
+    /\b(recipe|cook(ing)?|weather forecast|movie review|song lyrics)\b/i,
+    /\b(play a game|sport score|stock price|crypto price)\b/i,
+    /\b(tell me a joke|write a story|sing a song)\b/i,
 ];
 
 /**
@@ -55,14 +48,7 @@ export const classifyQuery = (question) => {
 
     // Very short queries (1-2 words) are likely factual lookups
     if (wordCount <= 2) {
-        return { type: "factual", topK: 3, confidence: 0.8 };
-    }
-
-    // Check DB patterns first (structured data)
-    for (const pattern of DB_PATTERNS) {
-        if (pattern.test(q)) {
-            return { type: "db", topK: 0, confidence: 0.9 };
-        }
+        return { type: "factual", topK: 4, confidence: 0.8 };
     }
 
     // Check for likely unsupported/off-topic queries
@@ -88,6 +74,12 @@ export const classifyQuery = (question) => {
         }
     }
 
+    // Multi-part questions (commas or "and" separating clauses) need more context
+    const hasMultipleParts = (q.match(/,/g) || []).length >= 2 || /\band\b.*\band\b/i.test(q);
+    if (hasMultipleParts) {
+        return { type: "conceptual", topK: 7, confidence: 0.75 };
+    }
+
     // Longer queries are more likely conceptual
     if (wordCount >= 10) {
         return { type: "conceptual", topK: 6, confidence: 0.7 };
@@ -98,10 +90,9 @@ export const classifyQuery = (question) => {
 };
 
 /**
- * Legacy-compatible wrapper that returns "RAG" or "DB" string.
- * Kept for backward compatibility if any code still expects the old interface.
+ * Legacy-compatible wrapper that returns "RAG" string.
+ * The "DB" type no longer exists — all queries go through RAG.
  */
 export const classifyQueryLegacy = (question) => {
-    const result = classifyQuery(question);
-    return result.type === "db" ? "DB" : "RAG";
+    return "RAG";
 };

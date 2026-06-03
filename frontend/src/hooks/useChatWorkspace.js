@@ -28,8 +28,8 @@ export default function useChatWorkspace(docId, navigate) {
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [mode, setMode] = useState('standard');
   const [isBusyWorkspace, setIsBusyWorkspace] = useState(false);
+  const [mode, setMode] = useState('standard');
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -300,6 +300,21 @@ export default function useChatWorkspace(docId, navigate) {
     if (chat.activeDocumentIds?.length) setActiveDocumentIds(chat.activeDocumentIds);
   };
 
+  // ── New Chat — proper state reset without page reload ──
+  const handleNewChat = useCallback(() => {
+    setSelectedChatId(null);
+    setSelectedDocumentId(null);
+    setSelectedWorkspaceId(null);
+    setSelectedDocName('');
+    setActiveDocumentIds([]);
+    setInput('');
+    setMessages([{
+      role: 'assistant',
+      content: "Welcome. Select a document or upload one to begin your research.",
+    }]);
+    navigate('/chat');
+  }, [navigate]);
+
   const handleCreateWorkspace = async (name, docIds) => {
     if (isBusyWorkspace || !name.trim() || docIds.length === 0) return;
     setIsBusyWorkspace(true);
@@ -317,15 +332,22 @@ export default function useChatWorkspace(docId, navigate) {
   const handleDeleteWorkspace = async (wsId) => {
     if (isBusyWorkspace) return;
     setIsBusyWorkspace(true);
+    // Optimistic removal
+    const prevWorkspaces = workspaces;
+    setWorkspaces(prev => prev.filter(w => w._id !== wsId));
+    if (selectedWorkspaceId === wsId) {
+      setSelectedWorkspaceId(null);
+      setActiveDocumentIds([]);
+    }
     try {
       await deleteWorkspace(wsId);
-      setWorkspaces(prev => prev.filter(w => w._id !== wsId));
-      if (selectedWorkspaceId === wsId) {
-        setSelectedWorkspaceId(null);
-        setActiveDocumentIds([]);
-      }
-    } catch (err) { console.error('Failed to delete workspace', err); }
-    finally { setIsBusyWorkspace(false); }
+    } catch (err) {
+      // Rollback on failure
+      console.error('Failed to delete workspace', err);
+      setWorkspaces(prevWorkspaces);
+    } finally {
+      setIsBusyWorkspace(false);
+    }
   };
 
   const toggleActiveDocument = (docId) => {
@@ -334,28 +356,68 @@ export default function useChatWorkspace(docId, navigate) {
     );
   };
 
+  // ── Optimistic add document to workspace ──
   const handleAddDocumentToWorkspace = async (docId) => {
-    if (!selectedWorkspaceId || isBusyWorkspace) return;
-    setIsBusyWorkspace(true);
+    if (!selectedWorkspaceId) return;
+
+    // Optimistic update — apply immediately
+    const prevWorkspaces = workspaces;
+    const prevActiveIds = activeDocumentIds;
+    const docToAdd = documents.find(d => d._id === docId);
+
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws._id !== selectedWorkspaceId) return ws;
+      if (ws.documents.some(d => d._id === docId)) return ws; // already in
+      return {
+        ...ws,
+        documents: [...ws.documents, docToAdd].filter(Boolean),
+        documentIds: [...ws.documentIds, docId],
+      };
+    }));
+    setActiveDocumentIds(prev => [...new Set([...prev, docId])]);
+
     try {
+      // Fire API in background — don't block UI
       const workspace = await addWorkspaceDocuments(selectedWorkspaceId, [docId]);
+      // Reconcile with server response
       setWorkspaces(prev => prev.map(item => item._id === workspace._id ? workspace : item));
-      setActiveDocumentIds(prev => [...new Set([...prev, docId])]);
     } catch (err) {
+      // Rollback on failure
+      setWorkspaces(prevWorkspaces);
+      setActiveDocumentIds(prevActiveIds);
       setMessages(p => [...p, { role: 'assistant', content: `Could not add document: ${err.message}` }]);
-    } finally { setIsBusyWorkspace(false); }
+    }
   };
 
+  // ── Optimistic remove document from workspace ──
   const handleRemoveDocumentFromWorkspace = async (docId) => {
-    if (!selectedWorkspaceId || isBusyWorkspace) return;
-    setIsBusyWorkspace(true);
+    if (!selectedWorkspaceId) return;
+
+    // Optimistic update — apply immediately
+    const prevWorkspaces = workspaces;
+    const prevActiveIds = activeDocumentIds;
+
+    setWorkspaces(prev => prev.map(ws => {
+      if (ws._id !== selectedWorkspaceId) return ws;
+      return {
+        ...ws,
+        documents: ws.documents.filter(d => d._id !== docId),
+        documentIds: ws.documentIds.filter(id => id !== docId),
+      };
+    }));
+    setActiveDocumentIds(prev => prev.filter(id => id !== docId));
+
     try {
+      // Fire API in background — don't block UI
       const workspace = await removeWorkspaceDocument(selectedWorkspaceId, docId);
+      // Reconcile with server response
       setWorkspaces(prev => prev.map(item => item._id === workspace._id ? workspace : item));
-      setActiveDocumentIds(prev => prev.filter(id => id !== docId));
     } catch (err) {
+      // Rollback on failure
+      setWorkspaces(prevWorkspaces);
+      setActiveDocumentIds(prevActiveIds);
       setMessages(p => [...p, { role: 'assistant', content: `Could not remove document: ${err.message}` }]);
-    } finally { setIsBusyWorkspace(false); }
+    }
   };
 
   return {
@@ -375,6 +437,7 @@ export default function useChatWorkspace(docId, navigate) {
     handleSubmit, handleFileUpload, handleDeleteChat,
     handleSelectDocument, handleSelectWorkspace, handleSelectChat,
     handleCreateWorkspace, handleDeleteWorkspace,
+    handleNewChat,
     toggleActiveDocument,
     handleAddDocumentToWorkspace, handleRemoveDocumentFromWorkspace,
   };

@@ -465,3 +465,306 @@ body {
   margin-bottom: var(--space-2);
   user-select: none;
 }
+
+/* ═══════════════════════════════════════════
+   Sidebar Item Styles
+   ═══════════════════════════════════════════ */
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  height: 34px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: all 120ms ease;
+  position: relative;
+  user-select: none;
+  border: none;
+  outline: none;
+}
+
+.sidebar-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.sidebar-item--active {
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--accent-subtle);
+}
+
+.sidebar-item--active:hover {
+  background: var(--accent-subtle);
+}
+
+.sidebar-item__icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-item--active .sidebar-item__icon {
+  color: var(--accent);
+}
+
+.sidebar-item__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sidebar-item__suffix {
+  flex-shrink: 0;
+}
+
+.sidebar-item__delete {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 100ms ease;
+  background: transparent;
+  border: none;
+  outline: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-item:hover .sidebar-item__delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-item__delete:hover {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+/* Hide suffix when parent hovered (so delete button can show) */
+.sidebar-item:hover .sidebar-item__suffix--hideable {
+  opacity: 0;
+}
+
+/* ═══════════════════════════════════════════
+   Workspace Document Pills
+   ═══════════════════════════════════════════ */
+
+.ws-doc-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 150ms ease;
+  font-family: var(--font-sans);
+}
+
+.ws-doc-pill:hover {
+  border-color: var(--border-hover);
+}
+
+.ws-doc-pill--active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.ws-doc-pill--active:hover {
+  border-color: var(--accent-hover);
+}
+
+/* ═══════════════════════════════════════════
+   Workspace Modal — Custom Checkboxes
+   ═══════════════════════════════════════════ */
+
+.ws-modal-doc-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.ws-modal-doc-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  transition: background 100ms ease;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+
+.ws-modal-doc-item:not(:last-child) {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ws-modal-doc-item:hover {
+  background: var(--bg-surface);
+}
+
+.ws-modal-doc-item--selected {
+  background: var(--accent-subtle);
+}
+
+.ws-modal-doc-item--selected:hover {
+  background: var(--accent-subtle);
+}
+
+.custom-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border-color);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+}
+
+.custom-checkbox--checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.custom-checkbox__check {
+  opacity: 0;
+  transform: scale(0.5);
+  transition: all 150ms ease;
+}
+
+.custom-checkbox--checked .custom-checkbox__check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ═══════════════════════════════════════════
+   Workspace Modal — Search Input
+   ═══════════════════════════════════════════ */
+
+.ws-modal-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  margin-bottom: var(--space-3);
+  transition: border-color 150ms ease;
+}
+
+.ws-modal-search:focus-within {
+  border-color: var(--accent);
+}
+
+.ws-modal-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.ws-modal-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* ═══════════════════════════════════════════
+   Delete Confirmation Popover
+   ═══════════════════════════════════════════ */
+
+.confirm-delete {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 50;
+  min-width: 200px;
+  padding: var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.confirm-delete__text {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.confirm-delete__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+/* ═══════════════════════════════════════════
+   Sidebar Item Enter/Exit Animations  
+   ═══════════════════════════════════════════ */
+
+@keyframes slideInItem {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOutItem {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+    max-height: 40px;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+    max-height: 0;
+  }
+}
+
+.sidebar-item-enter {
+  animation: slideInItem 200ms var(--transition-spring) forwards;
+}
