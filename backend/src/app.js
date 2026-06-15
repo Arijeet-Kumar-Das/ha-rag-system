@@ -6,6 +6,7 @@ import askRoutes from "./routes/askRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import workspaceRoutes from "./routes/workspaceRoutes.js";
+import diagnosticRoutes from "./routes/diagnosticRoutes.js";
 import { protect } from "./middleware/authMiddleware.js";
 
 const app = express();
@@ -28,6 +29,7 @@ app.use("/api/ask", protect, askRoutes);
 app.use("/api/document", protect, documentRoutes);
 app.use("/api/workspace", protect, workspaceRoutes);
 app.use("/api/chat", protect, chatRoutes);
+app.use("/api/diagnostics", protect, diagnosticRoutes);
 
 app.get("/", (req, res) => {
     res.send("HA-RAG API Running 🚀");

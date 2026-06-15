@@ -3,11 +3,14 @@ import { streamAnswer } from "../services/llmService.js";
 import { verifyAnswer } from "../services/verificationService.js";
 import { getCache, setCache } from "../services/cacheService.js";
 import { classifyQuery } from "../services/classificationService.js";
+import { rewriteQuery } from "../services/queryRewriteService.js";
 import { createSseStream } from "../utils/sse.js";
 import Document from "../models/Document.js";
 import Workspace from "../models/Workspace.js";
 import Chat from "../models/Chat.js";
 import Message from "../models/Message.js";
+
+const CHAT_HISTORY_LIMIT = parseInt(process.env.CHAT_HISTORY_LIMIT, 10) || 10;
 
 const createHttpError = (status, message) => {
     const error = new Error(message);
@@ -223,14 +226,33 @@ export const askQuestion = async (req, res) => {
 
             chatHistory = await Message.find({ chatId: targetChatId })
                 .sort({ createdAt: 1 })
-                .limit(8)
+                .limit(CHAT_HISTORY_LIMIT)
                 .lean();
             console.log("[ASK] Chat history length:", chatHistory.length);
         }
 
-        // ── 1. Classify query (local heuristics — <1ms) ─────────────────
+        // ── 1b. Rewrite follow-up queries using conversation history ────
+        //
+        // The rewritten query is used ONLY for retrieval and classification.
+        // The original question is kept for display and the LLM prompt.
+        //
+        let retrievalQuery = question;
+        let rewriteMethod = "none";
+
+        if (chatHistory.length > 0) {
+            const rewriteResult = await rewriteQuery(question, chatHistory);
+            retrievalQuery = rewriteResult.rewritten;
+            rewriteMethod = rewriteResult.method;
+            if (rewriteMethod !== "none") {
+                console.log(`[ASK] Query rewritten (${rewriteMethod}): "${question}" → "${retrievalQuery}"`);
+            }
+        }
+
+        // ── 2. Classify query (local heuristics — <1ms) ─────────────────
+        // Use the rewritten query for classification so follow-ups get
+        // appropriate topK and query type.
         const classifyStart = Date.now();
-        const classification = classifyQuery(question);
+        const classification = classifyQuery(retrievalQuery);
         timings.classifyMs = Date.now() - classifyStart;
         console.log(`[ASK] Classification: ${JSON.stringify(classification)} (${timings.classifyMs}ms)`);
 
@@ -315,7 +337,7 @@ export const askQuestion = async (req, res) => {
 
         let chunks;
         try {
-            chunks = await retrieveRelevantChunks(question, retrievalTargets, {
+            chunks = await retrieveRelevantChunks(retrievalQuery, retrievalTargets, {
                 topK: classification.topK,
                 queryType: classification.type,
                 timings

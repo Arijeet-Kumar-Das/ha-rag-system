@@ -5,9 +5,19 @@ const chunkSchema = new mongoose.Schema({
     chunkIndex: Number,
     fileName: String,
     namespace: String,
-    userId: String
+    userId: String,
+    extractionMethod: {
+        type: String,
+        enum: ["text", "ocr", "figure", "table", "mixed"],
+        default: "text",
+    },
+    ocrConfidence: { type: Number, default: null },
+    sourcePages: [Number],
+    figureIds: [String],
+    hasFigureContent: { type: Boolean, default: false },
+    tableIds: [String],
+    hasTableContent: { type: Boolean, default: false },
 });
-
 
 chunkSchema.index({ text: "text" });
 chunkSchema.index({ namespace: 1 });

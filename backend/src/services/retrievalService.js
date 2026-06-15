@@ -196,6 +196,7 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
                 fileName: match.metadata?.fileName || target.fileName,
                 namespace: target.namespace,
                 documentId: target.documentId,
+                extractionMethod: match.metadata?.extractionMethod || "text",
                 semanticScore: match.score
             }));
         })
@@ -256,6 +257,7 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
             fileName: enriched.fileName,
             namespace: enriched.namespace,
             documentId: enriched.documentId,
+            extractionMethod: enriched.extractionMethod || "text",
             semanticScore: isSemantic ? enriched.semanticScore : 0,
             keywordScore: isSemantic ? 0 : enriched.keywordScore
         });
@@ -264,13 +266,23 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
     filteredSemantic.forEach(chunk => addChunk(chunk, true));
     keywordResults.forEach(chunk => addChunk(chunk, false));
 
-    // ── Score and rank ───────────────────────────────────────────────────
-    const scored = Array.from(mergedMap.values()).map(chunk => ({
-        ...chunk,
-        finalScore:
+    // ── Score and rank (with OCR boost) ───────────────────────────────
+    const scored = Array.from(mergedMap.values()).map(chunk => {
+        const baseFinalScore =
             ((chunk.semanticScore || 0) / maxSemantic) * 0.7 +
-            ((chunk.keywordScore || 0) / maxKeyword) * 0.3
-    }));
+            ((chunk.keywordScore || 0) / maxKeyword) * 0.3;
+
+        // OCR boost: when an OCR chunk has a keyword match, give it a
+        // small boost.  OCR content (structured key-value text) often
+        // scores well on BM25 but poorly on semantic similarity.
+        const isOcr = chunk.extractionMethod === "ocr";
+        const ocrBoost = isOcr && (chunk.keywordScore || 0) > 0 ? 0.05 : 0;
+
+        return {
+            ...chunk,
+            finalScore: baseFinalScore + ocrBoost,
+        };
+    });
 
     const sorted = scored.sort((a, b) => b.finalScore - a.finalScore);
 
@@ -283,6 +295,21 @@ export const retrieveRelevantChunks = async (query, targetInput, options = {}) =
     timings.mergeMs = Date.now() - mergeStart;
 
     console.log(`[RETRIEVAL] After dedup: ${deduped.length}, final: ${finalChunks.length}`);
+
+    // ── OCR retrieval diagnostics ─────────────────────────────────────
+    const methodBreakdown = finalChunks.reduce((acc, c) => {
+        const m = c.extractionMethod || "text";
+        acc[m] = (acc[m] || 0) + 1;
+        return acc;
+    }, {});
+    const breakdownStr = Object.entries(methodBreakdown)
+        .map(([m, n]) => `${n} ${m}`)
+        .join(", ");
+    console.log(`[RETRIEVAL] Retrieved chunk methods: ${breakdownStr}`);
+    if (methodBreakdown.ocr) {
+        console.log(`[RETRIEVAL] ✅ OCR chunks retrieved: ${methodBreakdown.ocr}`);
+    }
+
     console.log(`[RETRIEVAL] Timings — embedding: ${timings.embeddingMs}ms, vector: ${timings.vectorSearchMs}ms, keyword: ${timings.keywordSearchMs}ms, merge: ${timings.mergeMs}ms`);
 
     return finalChunks;

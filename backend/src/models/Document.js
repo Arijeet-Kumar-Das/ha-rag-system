@@ -6,7 +6,29 @@ const documentSchema = new mongoose.Schema({
     userId: { type: String, default: "anonymous" },
     chunkCount: Number,
     cloudinaryUrl: String,
-    uploadDate: { type: Date, default: Date.now }
+    uploadDate: { type: Date, default: Date.now },
+    extractionMethod: {
+        type: String,
+        enum: ["text", "ocr", "figure", "table", "mixed"],
+        default: "text",
+    },
+    ocrStats: {
+        totalPages: Number,
+        textPages: Number,
+        ocrPages: Number,
+        failedPages: Number,
+    },
+    figureStats: {
+        pagesWithFigures: Number,
+        totalFigures: Number,
+        figureTypes: [String],
+    },
+    tableStats: {
+        pagesWithTables: Number,
+        totalTables: Number,
+        tableTypes: [String],
+        totalRows: Number,
+    },
 });
 
 documentSchema.index({ userId: 1, uploadDate: -1 });

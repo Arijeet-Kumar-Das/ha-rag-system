@@ -15,6 +15,7 @@ const MAX_TOKENS = 2048;          // Increased from 1024 for multi-doc workspace
 const MAX_CONTEXT_WORDS = 1200;   // Increased from 800 for better coverage in workspace mode
 const MAX_HISTORY_WORDS = 500;
 const MAX_PER_MESSAGE_WORDS = 200;
+const LLM_HISTORY_MESSAGES = parseInt(process.env.LLM_HISTORY_MESSAGES, 10) || 5;
 const REQUEST_TIMEOUT_MS = 45000; // 45-second timeout for OpenAI requests
 const MAX_RETRIES = 1;            // Single retry for transient errors
 
@@ -62,10 +63,10 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     currentWordCount += words.length;
   }
 
-  // 4. Prepend chatHistory (limit to last 3 messages, trim each)
+  // 4. Prepend chatHistory (limit to recent messages, trim each)
   let historyWordCount = 0;
 
-  const trimmedHistory = chatHistory.slice(-3);
+  const trimmedHistory = chatHistory.slice(-LLM_HISTORY_MESSAGES);
   const historyMessages = [];
 
   for (const msg of trimmedHistory) {
@@ -99,18 +100,25 @@ const buildMessages = (question, chunks, chatHistory = []) => {
     ? `\nYou have context from ${uniqueFiles.size} documents: ${[...uniqueFiles].join(", ")}. Reference specific document names when citing information.`
     : "";
 
+  // Conversation continuity note
+  const hasHistory = historyMessages.length > 0;
+  const continuityNote = hasHistory
+    ? "\nThis is part of an ongoing conversation. Use the chat history to understand context and pronoun references. Answer the current question while maintaining conversational coherence."
+    : "";
+
   return [
     {
       role: "system",
       content:
-        `You are an academic research assistant. Answer the user's question thoroughly using ONLY the provided context.${multiDocNote}
+        `You are an academic research assistant. Answer the user's question thoroughly using ONLY the provided context.${multiDocNote}${continuityNote}
 
 Guidelines:
 - Cite document names when making document-specific claims.
 - If the context contains relevant information, provide a comprehensive answer.
 - If the context does NOT contain the answer, say so clearly — do NOT make up information.
 - For multi-part questions, address each part systematically.
-- Use markdown formatting (headers, lists, bold) for readability.`
+- Use markdown formatting (headers, lists, bold) for readability.
+- When the user refers to previous messages (e.g. "explain more", "what about that"), use the conversation history to understand what they are referring to.`
     },
     ...historyMessages,
     {

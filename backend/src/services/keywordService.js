@@ -20,6 +20,7 @@ export const keywordSearch = async (query, namespace, limit = 8) => {
         chunkIndex: doc.chunkIndex,
         fileName: doc.fileName,
         namespace: doc.namespace,
+        extractionMethod: doc.extractionMethod || "text",
         keywordScore: doc._doc.score
     }));
 };
