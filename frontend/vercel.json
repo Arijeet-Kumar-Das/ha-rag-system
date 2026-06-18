@@ -2,7 +2,7 @@
     "rewrites": [
         {
             "source": "/api/(.*)",
-            "destination": "https://ha-rag-system-2.onrender.com/api/$1"
+            "destination": "https://ha-rag-system.onrender.com/api/$1"
         },
         {
             "source": "/((?!api/).*)",

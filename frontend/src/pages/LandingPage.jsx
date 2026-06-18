@@ -14,55 +14,112 @@ const fadeUp = {
   }),
 };
 
-const features = [
+const fadeUpScroll = {
+  hidden: { opacity: 0, y: 24 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+  },
+};
+
+/* ── Feature cards data ──────────────────────────────────────────── */
+const featureCards = [
   {
-    title: "Verified Citations",
-    desc: "Every claim is traced back to the exact paragraph in your source PDF. No hallucinations.",
+    title: "OCR Extraction",
+    desc: "Automatically detects scanned pages and extracts text using Tesseract OCR. Works on image-based PDFs, photos of documents, and mixed-content files.",
     icon: (
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M7 8h4M7 12h10M7 16h7" />
+        <path d="M17 8l2-2M19 8l-2-2" strokeWidth="1.4" />
+      </svg>
+    ),
+  },
+  {
+    title: "Figure Understanding",
+    desc: "Identifies charts, diagrams, and visual elements. Generates retrieval-optimized descriptions with trends, comparisons, and numerical insights.",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <polyline points="7 14 10 10 13 13 17 8" />
+        <circle cx="17" cy="8" r="1" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
+    title: "Table Intelligence",
+    desc: "Detects and understands tables. Extracts structure, headers, and data relationships. Generates semantic summaries for accurate retrieval.",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <line x1="3" y1="9" x2="21" y2="9" />
+        <line x1="3" y1="15" x2="21" y2="15" />
+        <line x1="9" y1="3" x2="9" y2="21" />
+        <line x1="15" y1="3" x2="15" y2="21" />
+      </svg>
+    ),
+  },
+  {
+    title: "Hybrid Search",
+    desc: "Combines BM25 keyword matching with dense vector search using Reciprocal Rank Fusion for superior retrieval accuracy across all content types.",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <circle cx="11" cy="11" r="7" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        <line x1="8" y1="11" x2="14" y2="11" />
+        <line x1="11" y1="8" x2="11" y2="14" />
+      </svg>
+    ),
+  },
+  {
+    title: "Source Attribution",
+    desc: "Every answer traces back to exact source paragraphs, figures, or tables. Extraction method and page numbers are preserved at the chunk level.",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         <path d="m9 12 2 2 4-4" />
       </svg>
     ),
   },
   {
-    title: "Workspace Silos",
-    desc: "Group related papers into isolated workspaces to prevent cross-contamination of sources.",
+    title: "Research Workspaces",
+    desc: "Organize papers into isolated workspaces. Query across multiple documents without cross-contamination. Built for systematic literature reviews.",
     icon: (
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+        <line x1="12" y1="11" x2="12" y2="17" />
+        <line x1="9" y1="14" x2="15" y2="14" />
       </svg>
     ),
   },
+];
+
+/* ── Architecture decomposition data ─────────────────────────────── */
+const decompositionLayers = [
   {
-    title: "Confidence Scoring",
-    desc: "Every answer is graded on a confidence scale — green, amber, or red — so you know what to trust.",
-    icon: (
-      <svg
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      >
-        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-      </svg>
-    ),
+    title: "Text",
+    desc: "Direct text extraction with page-level segmentation",
+    badge: "PyMuPDF",
+    dotColor: "#5b8def",
+  },
+  {
+    title: "OCR",
+    desc: "Tesseract-powered extraction for scanned content",
+    badge: "Tesseract",
+    dotColor: "#e8924a",
+  },
+  {
+    title: "Figures",
+    desc: "Vision AI descriptions of charts and diagrams",
+    badge: "GPT-4o",
+    dotColor: "#52b97b",
+  },
+  {
+    title: "Tables",
+    desc: "Structured analysis with trend and comparison insights",
+    badge: "GPT-4o",
+    dotColor: "#a578d6",
   },
 ];
 
@@ -106,76 +163,74 @@ function PipelineVisual({ isDark }) {
   const steps = [
     {
       icon: (
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-        >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+      ),
+      label: "Document Upload",
+      sub: "Upload PDFs into isolated workspaces",
+      badge: null,
+    },
+    {
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
           <polyline points="14 2 14 8 20 8" />
           <line x1="16" y1="13" x2="8" y2="13" />
           <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
       ),
-      label: "Source PDFs",
-      sub: "Upload academic papers into a workspace",
+      label: "Text Extraction + OCR",
+      sub: "Native text and scanned page extraction",
+      badge: "Tesseract",
+    },
+    {
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <polyline points="7 14 10 10 13 13 17 8" />
+          <line x1="3" y1="15" x2="21" y2="15" />
+          <line x1="9" y1="15" x2="9" y2="21" />
+        </svg>
+      ),
+      label: "Figure & Table Analysis",
+      sub: "Vision AI interprets charts, diagrams, and tables",
+      badge: "GPT-4o",
+    },
+    {
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      ),
+      label: "Semantic Chunking",
+      sub: "Context-aware segmentation with metadata",
       badge: null,
     },
     {
       icon: (
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-        >
-          <ellipse cx="12" cy="5" rx="9" ry="3" />
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-        </svg>
-      ),
-      label: "Vector index",
-      sub: "Chunks embedded into Pinecone",
-      badge: "Pinecone",
-    },
-    {
-      icon: (
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-        >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
       ),
-      label: "Semantic retrieval",
-      sub: "Top-k chunks matched to your query",
-      badge: "RAG",
+      label: "Hybrid Retrieval",
+      sub: "Dual-path search with rank fusion",
+      badge: "BM25 + Vector",
     },
     {
       icon: (
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-        >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
         </svg>
       ),
-      label: "Grounded answer",
-      sub: "GPT-4 responds using only retrieved context",
+      label: "Grounded Answer",
+      sub: "LLM responds using only retrieved context",
       badge: "GPT-4",
     },
   ];
@@ -207,7 +262,7 @@ function PipelineVisual({ isDark }) {
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.4 + i * 0.1 }}
+            transition={{ duration: 0.45, delay: 0.4 + i * 0.08 }}
             style={nodeStyle}
           >
             <div style={iconBoxStyle}>{step.icon}</div>
@@ -254,7 +309,7 @@ function PipelineVisual({ isDark }) {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.5 + i * 0.1 }}
+              transition={{ delay: 0.5 + i * 0.08 }}
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -263,7 +318,7 @@ function PipelineVisual({ isDark }) {
               }}
             >
               <div
-                style={{ width: 1, height: 18, background: connectorColor }}
+                style={{ width: 1, height: 14, background: connectorColor }}
               />
               <div
                 style={{
@@ -274,7 +329,7 @@ function PipelineVisual({ isDark }) {
                   marginLeft: -2,
                 }}
               />
-              <div style={{ height: 3 }} />
+              <div style={{ height: 2 }} />
             </motion.div>
           )}
         </div>
@@ -284,9 +339,9 @@ function PipelineVisual({ isDark }) {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 0.9 }}
+        transition={{ delay: 1.0 }}
         style={{
-          marginTop: 16,
+          marginTop: 14,
           padding: "10px 14px",
           borderRadius: 8,
           background: isDark
@@ -320,13 +375,13 @@ function PipelineVisual({ isDark }) {
         </span>
       </motion.div>
 
-      {/* ── Stats row below pipeline ── */}
+      {/* Stats row */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.0, duration: 0.4 }}
+        transition={{ delay: 1.1, duration: 0.4 }}
         style={{
-          marginTop: 24,
+          marginTop: 20,
           display: "grid",
           gridTemplateColumns: "1fr 1fr 1fr",
           gap: 1,
@@ -336,8 +391,8 @@ function PipelineVisual({ isDark }) {
         }}
       >
         {[
-          { value: "RAG", label: "Architecture" },
-          { value: "GPT-4", label: "Powered by" },
+          { value: "5-Stage", label: "Pipeline" },
+          { value: "Multimodal", label: "Analysis" },
           { value: "100%", label: "Grounded" },
         ].map((stat, i) => (
           <div
@@ -383,6 +438,8 @@ export default function LandingPage() {
   const { user } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const logo = useLogo();
+
+  const capabilityPills = ["OCR", "Figure AI", "Table AI", "Hybrid Search"];
 
   return (
     <div
@@ -516,20 +573,20 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* ── Hero ── */}
-      <main
+      {/* ── Hero Section ── */}
+      <section
+        className="harag-hero-grid"
         style={{
           position: "relative",
           zIndex: 1,
-          flex: 1,
           maxWidth: 1160,
           margin: "0 auto",
           width: "100%",
-          padding: "56px 48px 56px",
+          padding: "56px 48px 64px",
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
           gap: 64,
-          alignItems: "start" /* ← top-align so both sides start at same y */,
+          alignItems: "start",
         }}
       >
         {/* Left */}
@@ -548,7 +605,7 @@ export default function LandingPage() {
               marginBottom: 20,
             }}
           >
-            Academic OS 2.0
+            Multimodal Document Intelligence
           </motion.p>
 
           <motion.h1
@@ -557,15 +614,15 @@ export default function LandingPage() {
             variants={fadeUp}
             custom={1}
             style={{
-              fontSize: "clamp(2.6rem, 4.5vw, 4rem)",
+              fontSize: "clamp(2.2rem, 4vw, 3.4rem)",
               fontWeight: 700,
               letterSpacing: "-0.04em",
               color: "var(--text-primary)",
-              lineHeight: 1.06,
-              marginBottom: 20,
+              lineHeight: 1.08,
+              marginBottom: 22,
             }}
           >
-            Research intelligence,{" "}
+            Ask Questions Across Text,{" "}
             <span
               style={{
                 fontFamily: "var(--font-serif)",
@@ -578,9 +635,9 @@ export default function LandingPage() {
                 backgroundClip: "text",
               }}
             >
-              grounded
-            </span>{" "}
-            in your documents.
+              Tables, Charts
+            </span>
+            , and Scanned Documents.
           </motion.h1>
 
           <motion.p
@@ -593,14 +650,15 @@ export default function LandingPage() {
               color: "var(--text-secondary)",
               lineHeight: 1.75,
               marginBottom: 32,
-              maxWidth: 440,
+              maxWidth: 460,
             }}
           >
-            Upload academic papers, build targeted workspaces, and query your
-            research with verified, source-grounded answers. No hallucinations —
-            just citations.
+            Upload research papers — HA-RAG extracts text, reads scanned pages,
+            understands figures, and analyzes tables. Ask anything and get
+            verified, source-grounded answers.
           </motion.p>
 
+          {/* CTA buttons */}
           <motion.div
             initial="hidden"
             animate="visible"
@@ -610,7 +668,7 @@ export default function LandingPage() {
               display: "flex",
               alignItems: "center",
               gap: 12,
-              marginBottom: 44,
+              marginBottom: 28,
             }}
           >
             <Link to={user ? "/dashboard" : "/register"}>
@@ -627,81 +685,411 @@ export default function LandingPage() {
             )}
           </motion.div>
 
-          {/* Divider + features */}
+          {/* Capability pills */}
           <motion.div
             initial="hidden"
             animate="visible"
             variants={fadeUp}
             custom={4}
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 0,
+            }}
           >
-            <div
-              style={{
-                height: 1,
-                background: "var(--border-color)",
-                marginBottom: 28,
-                maxWidth: 440,
-              }}
-            />
-            <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-              {features.map((feat, i) => (
-                <div
-                  key={i}
-                  style={{ display: "flex", alignItems: "flex-start", gap: 14 }}
-                >
-                  <div
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 8,
-                      background: "var(--accent-subtle)",
-                      color: "var(--accent)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                      marginTop: 1,
-                    }}
-                  >
-                    {feat.icon}
-                  </div>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: "var(--text-primary)",
-                        marginBottom: 3,
-                      }}
-                    >
-                      {feat.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--text-secondary)",
-                        lineHeight: 1.65,
-                      }}
-                    >
-                      {feat.desc}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {capabilityPills.map((pill, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "5px 14px",
+                  borderRadius: 20,
+                  background: "var(--accent-subtle)",
+                  border: "1px solid var(--accent-muted)",
+                  color: "var(--accent)",
+                  letterSpacing: "0.02em",
+                }}
+              >
+                {pill}
+              </span>
+            ))}
           </motion.div>
         </div>
 
-        {/* Right: pipeline — top-aligned, padded from divider */}
+        {/* Right: pipeline */}
         <div
           style={{
             borderLeft: "1px solid var(--border-color)",
             paddingLeft: 56,
-            paddingTop: 4 /* optical alignment with eyebrow on the left */,
+            paddingTop: 4,
           }}
         >
           <PipelineVisual isDark={isDark} />
         </div>
-      </main>
+      </section>
+
+      {/* ── Feature Cards Section ── */}
+      <section
+        style={{
+          position: "relative",
+          zIndex: 1,
+          borderTop: "1px solid var(--border-color)",
+        }}
+      >
+        <div
+          className="harag-section-inner"
+          style={{
+            maxWidth: 1160,
+            margin: "0 auto",
+            width: "100%",
+            padding: "80px 48px",
+          }}
+        >
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-60px" }}
+            variants={fadeUpScroll}
+            style={{ textAlign: "center", marginBottom: 48 }}
+          >
+            <h2
+              style={{
+                fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                letterSpacing: "-0.03em",
+                marginBottom: 12,
+              }}
+            >
+              Built for Every Layer of Your Documents
+            </h2>
+            <p
+              style={{
+                fontSize: 15,
+                color: "var(--text-secondary)",
+                lineHeight: 1.7,
+                maxWidth: 560,
+                margin: "0 auto",
+              }}
+            >
+              From scanned pages to complex data tables, HA-RAG extracts,
+              understands, and indexes every element for precise retrieval.
+            </p>
+          </motion.div>
+
+          <div
+            className="harag-features-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 18,
+            }}
+          >
+            {featureCards.map((card, i) => (
+              <motion.div
+                key={i}
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true, margin: "-40px" }}
+                variants={{
+                  hidden: { opacity: 0, y: 20 },
+                  visible: {
+                    opacity: 1,
+                    y: 0,
+                    transition: {
+                      duration: 0.45,
+                      delay: i * 0.07,
+                      ease: [0.22, 1, 0.36, 1],
+                    },
+                  },
+                }}
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 12,
+                  padding: 24,
+                }}
+              >
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 8,
+                    background: "var(--accent-subtle)",
+                    border: "1px solid var(--accent-muted)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--accent)",
+                    marginBottom: 14,
+                  }}
+                >
+                  {card.icon}
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    marginBottom: 8,
+                  }}
+                >
+                  {card.title}
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.65,
+                  }}
+                >
+                  {card.desc}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Architecture Decomposition Section ── */}
+      <section
+        style={{
+          position: "relative",
+          zIndex: 1,
+          borderTop: "1px solid var(--border-color)",
+        }}
+      >
+        <div
+          className="harag-section-inner"
+          style={{
+            maxWidth: 1160,
+            margin: "0 auto",
+            width: "100%",
+            padding: "80px 48px",
+          }}
+        >
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true, margin: "-60px" }}
+            variants={fadeUpScroll}
+            style={{ textAlign: "center", marginBottom: 48 }}
+          >
+            <h2
+              style={{
+                fontSize: "clamp(1.6rem, 3vw, 2.2rem)",
+                fontWeight: 700,
+                color: "var(--text-primary)",
+                letterSpacing: "-0.03em",
+                marginBottom: 12,
+              }}
+            >
+              Every Document, Fully Understood
+            </h2>
+            <p
+              style={{
+                fontSize: 15,
+                color: "var(--text-secondary)",
+                lineHeight: 1.7,
+                maxWidth: 560,
+                margin: "0 auto",
+              }}
+            >
+              HA-RAG decomposes documents into four semantic layers, each
+              optimized for retrieval.
+            </p>
+          </motion.div>
+
+          {/* 4 decomposition cards */}
+          <div
+            className="harag-arch-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 16,
+              marginBottom: 32,
+            }}
+          >
+            {decompositionLayers.map((layer, i) => (
+              <motion.div
+                key={i}
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true, margin: "-40px" }}
+                variants={{
+                  hidden: { opacity: 0, y: 18 },
+                  visible: {
+                    opacity: 1,
+                    y: 0,
+                    transition: {
+                      duration: 0.45,
+                      delay: i * 0.08,
+                      ease: [0.22, 1, 0.36, 1],
+                    },
+                  },
+                }}
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: 12,
+                  padding: 22,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: layer.dotColor,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    {layer.title}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "var(--text-secondary)",
+                    lineHeight: 1.6,
+                    flex: 1,
+                  }}
+                >
+                  {layer.desc}
+                </div>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: "4px 10px",
+                    borderRadius: 20,
+                    background: isDark
+                      ? "rgba(201,165,90,0.1)"
+                      : "rgba(201,165,90,0.08)",
+                    border: "1px solid rgba(201,165,90,0.2)",
+                    color: "#c9a55a",
+                    alignSelf: "flex-start",
+                    letterSpacing: "0.03em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {layer.badge}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Connector arrow */}
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeUpScroll}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 0,
+              marginBottom: 20,
+            }}
+          >
+            <div
+              style={{
+                width: 1,
+                height: 24,
+                background: isDark
+                  ? "rgba(201,165,90,0.3)"
+                  : "rgba(201,165,90,0.35)",
+              }}
+            />
+            <svg
+              width="12"
+              height="8"
+              viewBox="0 0 12 8"
+              fill="none"
+              style={{ display: "block" }}
+            >
+              <path
+                d="M1 1L6 6L11 1"
+                stroke="#c9a55a"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </motion.div>
+
+          {/* Unified pipeline card */}
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeUpScroll}
+            style={{
+              maxWidth: 480,
+              margin: "0 auto",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-color)",
+              borderRadius: 12,
+              padding: "22px 28px",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                marginBottom: 8,
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#c9a55a"
+                strokeWidth="1.8"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <span
+                style={{
+                  fontSize: 15,
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                }}
+              >
+                Unified Retrieval Pipeline
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                lineHeight: 1.6,
+              }}
+            >
+              All content types flow into a single BM25 + Vector search index
+            </div>
+          </motion.div>
+        </div>
+      </section>
 
       {/* ── Footer ── */}
       <footer
@@ -725,8 +1113,8 @@ export default function LandingPage() {
             © {new Date().getFullYear()} HA-RAG System
           </span>
         </div>
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          {["OpenAI GPT-4", "Pinecone", "RAG", "SSE Streaming"].map(
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {["GPT-4o", "Tesseract OCR", "Pinecone", "Hybrid RAG", "Vision AI"].map(
             (tech, i) => (
               <span
                 key={i}
@@ -746,6 +1134,54 @@ export default function LandingPage() {
           )}
         </div>
       </footer>
+
+      {/* ── Responsive overrides ── */}
+      <style>{`
+        @media (max-width: 900px) {
+          .harag-hero-grid {
+            grid-template-columns: 1fr !important;
+            gap: 40px !important;
+            padding: 40px 24px 48px !important;
+          }
+          .harag-hero-grid > div:last-child {
+            border-left: none !important;
+            padding-left: 0 !important;
+            border-top: 1px solid var(--border-color) !important;
+            padding-top: 32px !important;
+          }
+          .harag-features-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+          .harag-arch-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .harag-features-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .harag-arch-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+        @media (max-width: 800px) {
+          nav[style] {
+            padding-left: 20px !important;
+            padding-right: 20px !important;
+          }
+          footer[style] {
+            padding-left: 20px !important;
+            padding-right: 20px !important;
+            flex-direction: column !important;
+            gap: 12px !important;
+            text-align: center !important;
+          }
+          .harag-section-inner {
+            padding-left: 20px !important;
+            padding-right: 20px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
